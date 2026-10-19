@@ -227,6 +227,46 @@ func (r *Result) OK() bool {
 	return len(r.Outcomes) > 0
 }
 
+// execEnv holds the steps of Execute that touch the registry, Explorer or the
+// file system in ways tests need to replace or make fail. The defaults are the
+// real implementations.
+type execEnv struct {
+	active        func(t Target, path string) bool // is OneDrive syncing path (or can't we tell)?
+	navCleanup    func(t Target, lg *log.Logger) []string
+	tenantCleanup func(root string, t Target)
+}
+
+func defaultEnv() execEnv {
+	return execEnv{
+		active: func(t Target, path string) bool {
+			return onedrive.Gather(t.Hive, t.ProfileDir).IsActive(path)
+		},
+		navCleanup:    removeStaleNavEntries,
+		tenantCleanup: cleanupTenantRoot,
+	}
+}
+
+// env is replaced by tests.
+var env = defaultEnv()
+
+// removeStaleNavEntries removes Explorer navigation-pane entries that now point at nothing.
+func removeStaleNavEntries(t Target, lg *log.Logger) []string {
+	var removed []string
+	in := onedrive.Gather(t.Hive, t.ProfileDir)
+	if stale := onedrive.StaleNavEntries(t.Hive, in, nil); len(stale) > 0 {
+		for _, e := range stale {
+			if err := onedrive.RemoveNavEntry(t.Hive, e); err != nil {
+				lg.Printf("remove Explorer entry %s (%s): %v", e.Name, e.Target, err)
+			} else {
+				lg.Printf("removed Explorer entry %s (%s)", e.Name, e.Target)
+				removed = append(removed, e.Name)
+			}
+		}
+		onedrive.RefreshExplorer()
+	}
+	return removed
+}
+
 // Execute performs the plan as the current (target) user.
 func Execute(p *Plan, lg *log.Logger, ev *elog.Log) (*Result, error) {
 	res := &Result{User: p.Target.UserName, SID: p.Target.SID, Started: time.Now()}
@@ -249,7 +289,7 @@ func Execute(p *Plan, lg *log.Logger, ev *elog.Log) (*Result, error) {
 			out.ResyncURL = o.Library.ResyncURL()
 		}
 		// Re-check right before acting: never touch a folder OneDrive has picked up again.
-		if onedrive.Gather(p.Target.Hive, p.Target.ProfileDir).IsActive(o.Path) {
+		if env.active(p.Target, o.Path) {
 			out.Error = "folder is being synced again; left untouched"
 			res.Outcomes = append(res.Outcomes, out)
 			continue
@@ -273,21 +313,9 @@ func Execute(p *Plan, lg *log.Logger, ev *elog.Log) (*Result, error) {
 		}
 		out.Removed = !exists(o.Path)
 		res.Outcomes = append(res.Outcomes, out)
-		cleanupTenantRoot(o.TenantRoot, p.Target)
+		env.tenantCleanup(o.TenantRoot, p.Target)
 	}
-	// Remove Explorer navigation-pane entries that now point at nothing.
-	in := onedrive.Gather(p.Target.Hive, p.Target.ProfileDir)
-	if stale := onedrive.StaleNavEntries(p.Target.Hive, in, nil); len(stale) > 0 {
-		for _, e := range stale {
-			if err := onedrive.RemoveNavEntry(p.Target.Hive, e); err != nil {
-				lg.Printf("remove Explorer entry %s (%s): %v", e.Name, e.Target, err)
-			} else {
-				lg.Printf("removed Explorer entry %s (%s)", e.Name, e.Target)
-				res.ExplorerEntriesRemoved = append(res.ExplorerEntriesRemoved, e.Name)
-			}
-		}
-		onedrive.RefreshExplorer()
-	}
+	res.ExplorerEntriesRemoved = env.navCleanup(p.Target, lg)
 	res.Finished = time.Now()
 	if b, err := json.MarshalIndent(res, "", "  "); err == nil {
 		_ = os.WriteFile(filepath.Join(res.RunDir, "manifest.json"), b, 0o644)
