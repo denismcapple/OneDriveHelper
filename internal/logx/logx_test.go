@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func openT(t *testing.T, p string) *log.Logger {
@@ -90,6 +92,77 @@ func TestConcurrentWritersNoTornLines(t *testing.T) {
 		}
 		fh.Close()
 	}
+}
+
+func TestCreateProtectedDirHasNoInheritedACEs(t *testing.T) {
+	sid, err := currentSID()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := filepath.Join(t.TempDir(), "OneDriveHelper")
+	// Same shape as the real descriptor, plus the test user so the temp folder can be cleaned up.
+	sddl := "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)(A;OICI;FA;;;" + sid + ")"
+	if err := createProtectedDir(dir, sddl); err != nil {
+		t.Fatal(err)
+	}
+	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl, _, err := sd.Control()
+	if err != nil || ctl&windows.SE_DACL_PROTECTED == 0 {
+		t.Errorf("DACL must be protected from the start (control %#x, %v)", ctl, err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		if ace.Header.AceFlags&windows.INHERITED_ACE != 0 {
+			t.Errorf("ACE %d is inherited", i)
+		}
+	}
+}
+
+func TestPrepareProgramDataDirMovesUntrustedFolder(t *testing.T) {
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("needs elevation")
+	}
+	pd := t.TempDir()
+	t.Setenv("ProgramData", pd)
+	planted := filepath.Join(pd, "OneDriveHelper")
+	os.MkdirAll(planted, 0o755) // created by "a user" (not owned by Administrators when run as a normal admin)
+	os.WriteFile(filepath.Join(planted, "service.log"), []byte("planted"), 0o644)
+	if err := PrepareProgramDataDir(); err != nil {
+		t.Fatal(err)
+	}
+	if !ownedByAdmins(planted) {
+		t.Error("the folder must end up owned by Administrators")
+	}
+}
+
+func TestOpenDoesNotCreateProgramDataFolder(t *testing.T) {
+	pd := t.TempDir()
+	t.Setenv("ProgramData", pd)
+	lg := Open(filepath.Join(pd, "OneDriveHelper", "service.log"), false)
+	if lg.Writer() != os.Stderr {
+		t.Error("must fall back to stderr instead of creating the folder with inherited permissions")
+	}
+	if _, err := os.Stat(filepath.Join(pd, "OneDriveHelper")); err == nil {
+		t.Error("folder must not be created by Open")
+	}
+}
+
+func currentSID() (string, error) {
+	u, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return u.User.Sid.String(), nil
 }
 
 func TestFallsBackToStderr(t *testing.T) {
