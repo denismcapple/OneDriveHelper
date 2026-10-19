@@ -264,11 +264,14 @@ func SaveLibraries(h Hive, libs []Library) error {
 }
 
 // LoadLibraries returns the cached library records.
-func LoadLibraries(h Hive) []Library {
+func LoadLibraries(h Hive) []Library { return loadLibraries(h, nil) }
+
+func loadLibraries(h Hive, r *readErrs) []Library {
 	var out []Library
-	for _, key := range h.SubKeys(cachePath) {
+	for _, key := range h.subKeys(cachePath, r) {
 		k, err := h.Open(cachePath+`\`+key, registry.QUERY_VALUE)
 		if err != nil {
+			r.add(h.Prefix+cachePath+`\`+key, err)
 			continue
 		}
 		g := func(n string) string { s, _, _ := k.GetStringValue(n); return s }

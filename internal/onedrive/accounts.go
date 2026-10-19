@@ -30,21 +30,25 @@ func (a Account) Configured() bool { return a.UserFolder != "" }
 func (a Account) Business() bool { return strings.HasPrefix(strings.ToLower(a.Key), "business") }
 
 // Accounts reads all OneDrive accounts from the user's hive.
-func Accounts(h Hive) []Account {
+func Accounts(h Hive) []Account { return accounts(h, nil) }
+
+func accounts(h Hive, r *readErrs) []Account {
 	var out []Account
-	for _, key := range h.SubKeys(accountsPath) {
+	for _, key := range h.subKeys(accountsPath, r) {
 		base := accountsPath + `\` + key
 		a := Account{
 			Key:         key,
-			UserEmail:   h.String(base, "UserEmail"),
-			UserFolder:  h.String(base, "UserFolder"),
-			DisplayName: h.String(base, "DisplayName"),
-			TenantID:    h.String(base, "ConfiguredTenantId"),
+			UserEmail:   h.str(base, "UserEmail", r),
+			UserFolder:  h.str(base, "UserFolder", r),
+			DisplayName: h.str(base, "DisplayName", r),
+			TenantID:    h.str(base, "ConfiguredTenantId", r),
 		}
-		for _, tenant := range h.SubKeys(base + `\Tenants`) {
-			a.SyncedFolders = append(a.SyncedFolders, valueNames(h, base+`\Tenants\`+tenant)...)
+		for _, tenant := range h.subKeys(base+`\Tenants`, r) {
+			names, _ := h.values(base+`\Tenants\`+tenant, r)
+			a.SyncedFolders = append(a.SyncedFolders, names...)
 		}
-		a.SyncedFolders = dedupe(append(a.SyncedFolders, stringValues(h, base+`\ScopeIdToMountPointPathCache`)...))
+		_, cached := h.values(base+`\ScopeIdToMountPointPathCache`, r)
+		a.SyncedFolders = dedupe(append(a.SyncedFolders, cached...))
 		out = append(out, a)
 	}
 	return out
@@ -71,16 +75,18 @@ type Provider struct {
 	LibraryType  string
 }
 
-func Providers(h Hive) []Provider {
+func Providers(h Hive) []Provider { return providers(h, nil) }
+
+func providers(h Hive, r *readErrs) []Provider {
 	var out []Provider
-	for _, key := range h.SubKeys(providersPath) {
+	for _, key := range h.subKeys(providersPath, r) {
 		p := providersPath + `\` + key
 		out = append(out, Provider{
 			Key:          key,
-			MountPoint:   h.String(p, "MountPoint"),
-			URLNamespace: h.String(p, "UrlNamespace"),
-			WebURL:       h.String(p, "WebUrl"),
-			LibraryType:  h.String(p, "LibraryType"),
+			MountPoint:   h.str(p, "MountPoint", r),
+			URLNamespace: h.str(p, "UrlNamespace", r),
+			WebURL:       h.str(p, "WebUrl", r),
+			LibraryType:  h.str(p, "LibraryType", r),
 		})
 	}
 	return out
@@ -88,29 +94,17 @@ func Providers(h Hive) []Provider {
 
 // RegisteredSyncRoots returns every folder registered with the Windows Cloud
 // Files API by OneDrive (for all users), from HKLM SyncRootManager.
-func RegisteredSyncRoots() []string {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, syncRootPath, registry.ENUMERATE_SUB_KEYS)
-	if err != nil {
-		return nil
-	}
-	defer k.Close()
-	names, _ := k.ReadSubKeyNames(-1)
+func RegisteredSyncRoots() []string { return registeredSyncRoots(nil) }
+
+func registeredSyncRoots(r *readErrs) []string {
+	lm := Hive{Root: registry.LOCAL_MACHINE}
 	var out []string
-	for _, n := range names {
+	for _, n := range lm.subKeys(syncRootPath, r) {
 		if !strings.HasPrefix(strings.ToLower(n), "onedrive!") {
 			continue
 		}
-		sk, err := registry.OpenKey(registry.LOCAL_MACHINE, syncRootPath+`\`+n+`\UserSyncRoots`, registry.QUERY_VALUE)
-		if err != nil {
-			continue
-		}
-		vals, _ := sk.ReadValueNames(-1)
-		for _, v := range vals {
-			if s, _, err := sk.GetStringValue(v); err == nil && s != "" {
-				out = append(out, s)
-			}
-		}
-		sk.Close()
+		_, vals := lm.values(syncRootPath+`\`+n+`\UserSyncRoots`, r)
+		out = append(out, vals...)
 	}
 	return out
 }
@@ -127,28 +121,4 @@ func dedupe(in []string) []string {
 	return out
 }
 
-func valueNames(h Hive, path string) []string {
-	k, err := h.Open(path, registry.QUERY_VALUE)
-	if err != nil {
-		return nil
-	}
-	defer k.Close()
-	names, _ := k.ReadValueNames(-1)
-	return names
-}
 
-func stringValues(h Hive, path string) []string {
-	k, err := h.Open(path, registry.QUERY_VALUE)
-	if err != nil {
-		return nil
-	}
-	defer k.Close()
-	names, _ := k.ReadValueNames(-1)
-	var out []string
-	for _, n := range names {
-		if s, _, err := k.GetStringValue(n); err == nil && s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
-}

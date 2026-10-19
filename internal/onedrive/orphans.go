@@ -61,6 +61,10 @@ type Inputs struct {
 	Policies   []Library // re-sync IDs recovered from ClientPolicy_*.ini (matched by URL)
 	// ShellFolders are the user's Desktop/Documents/... locations.
 	ShellFolders map[string]string // name -> path
+	// ReadErrors lists sources that exist but could not be read. When it is
+	// not empty the data may be incomplete, so IsActive treats every path as
+	// active and nothing should be changed on the strength of it.
+	ReadErrors []string
 }
 
 const userShellFoldersPath = `Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders`
@@ -68,12 +72,18 @@ const userShellFoldersPath = `Software\Microsoft\Windows\CurrentVersion\Explorer
 // ShellFolders reads the user's known-folder locations (Desktop, Documents,
 // Pictures, ...), expanding %USERPROFILE% to profileDir.
 func ShellFolders(h Hive, profileDir string) map[string]string {
+	return shellFolders(h, profileDir, nil)
+}
+
+func shellFolders(h Hive, profileDir string, r *readErrs) map[string]string {
 	k, err := h.Open(userShellFoldersPath, registry.QUERY_VALUE)
 	if err != nil {
+		r.add(h.Prefix+userShellFoldersPath, err)
 		return nil
 	}
 	defer k.Close()
-	names, _ := k.ReadValueNames(-1)
+	names, err := k.ReadValueNames(-1)
+	r.add(h.Prefix+userShellFoldersPath, err)
 	out := map[string]string{}
 	for _, n := range names {
 		v, _, err := k.GetStringValue(n)
@@ -126,19 +136,25 @@ func (osFS) ReadFile(p string) ([]byte, error)        { return os.ReadFile(p) }
 var OSFS FS = osFS{}
 
 // Gather collects detection inputs for the user behind h.
+//
+// Sources that exist but cannot be read are listed in ReadErrors. The
+// ClientPolicy files are not: they only supply re-sync IDs, never decide
+// whether a folder is active.
 func Gather(h Hive, profileDir string) Inputs {
-	accts := Accounts(h)
+	r := &readErrs{}
+	accts := accounts(h, r)
 	in := Inputs{
 		ProfileDir: profileDir,
 		Accounts:   accts,
-		Providers:  Providers(h),
-		SyncRoots:  RegisteredSyncRoots(),
-		Known:      LoadLibraries(h),
+		Providers:  providers(h, r),
+		SyncRoots:  registeredSyncRoots(r),
+		Known:      loadLibraries(h, r),
 	}
 	if profileDir != "" {
 		in.Policies = ReadClientPolicies(filepath.Join(profileDir, "AppData", "Local"), accts)
 	}
-	in.ShellFolders = ShellFolders(h, profileDir)
+	in.ShellFolders = shellFolders(h, profileDir, r)
+	in.ReadErrors = r.list
 	return in
 }
 
@@ -156,8 +172,9 @@ func (in Inputs) ActivePaths() []string {
 }
 
 // IsActive reports whether p is, contains, or is inside an active sync folder.
+// If any OneDrive data could not be read, every path counts as active.
 func (in Inputs) IsActive(p string) bool {
-	return overlaps(Clean(p), in.ActivePaths())
+	return len(in.ReadErrors) > 0 || overlaps(Clean(p), in.ActivePaths())
 }
 
 func overlaps(p string, active []string) bool {
