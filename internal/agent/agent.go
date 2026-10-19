@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -45,9 +46,11 @@ type Agent struct {
 	// stopping reports that the service has asked agents to exit (or is down):
 	// no fix may start, and a running fix moves no further folders.
 	stopping func() bool
-	// procState and onEvent are replaced in tests.
-	procState func() onedrive.ProcState
-	onEvent   func(id uint32)
+	// procState, onEvent, userFlow and afterPanic are replaced in tests.
+	procState  func() onedrive.ProcState
+	onEvent    func(id uint32)
+	userFlow   func(exe string, lg *log.Logger, busy func(bool), stop func() bool)
+	afterPanic func()
 
 	mu            sync.Mutex // guards the fields below (buttons run on other goroutines)
 	missingSince  time.Time
@@ -138,6 +141,7 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 	}
 	a.stopping = func() bool { return ctx.Err() != nil || (!standalone && !serviceRunning()) }
 	defer a.ev.Close()
+	popup.SetPanicHandler(func(r any, stack []byte) { a.logPanic("popup action", r, stack) })
 	if a.ui, err = popup.Start(); err != nil {
 		a.log.Printf("popup UI unavailable: %v", err)
 	}
@@ -292,8 +296,35 @@ func serviceRunning() bool {
 }
 
 func (a *Agent) actions() Actions {
-	return Actions{Relaunch: a.relaunch, Snooze: a.snooze, Support: a.support, Email: a.email, Website: a.website,
-		Fix: a.fix, Explain: a.explain, CopyDetails: a.copyDetails}
+	return Actions{
+		Relaunch:    a.safe("restart OneDrive", a.relaunch),
+		Snooze:      func(alert, d string) { a.safe("ignore", func() { a.snooze(alert, d) })() },
+		Support:     a.safe("contact support", a.support),
+		Email:       a.safe("e-mail support", a.email),
+		Website:     a.safe("support website", a.website),
+		Fix:         a.safe("fix", a.fix),
+		Explain:     func(topic string) { a.safe("explain", func() { a.explain(topic) })() },
+		CopyDetails: a.safe("copy details", a.copyDetails),
+	}
+}
+
+// safe wraps an action so a panic in it is logged with its stack trace and
+// never stops the agent.
+func (a *Agent) safe(name string, f func()) func() {
+	return func() {
+		defer func() {
+			if r := recover(); r != nil {
+				a.logPanic(name, r, debug.Stack())
+			}
+		}()
+		f()
+	}
+}
+
+func (a *Agent) logPanic(name string, r any, stack []byte) {
+	if a.log != nil {
+		a.log.Printf("panic in %s: %v\n%s", name, r, stack)
+	}
 }
 
 func (a *Agent) tick(cfg config.Config, now time.Time) {
@@ -539,6 +570,20 @@ func (a *Agent) fix() {
 		a.fixing, a.orphanKey = false, "" // re-evaluate (and re-alert if needed) on the next check
 		a.mu.Unlock()
 	}()
+	// A panic inside the fix has already unwound through Execute (releasing
+	// its locks, deleting nothing more): put back or report what it left at
+	// once, without waiting for the agent to restart.
+	defer func() {
+		if r := recover(); r != nil {
+			a.logPanic("fix", r, debug.Stack())
+			a.ui.Hide(idFixing)
+			if a.afterPanic != nil {
+				a.afterPanic()
+			} else {
+				a.recoverFixes()
+			}
+		}
+	}()
 	exe, err := os.Executable()
 	if err != nil {
 		a.log.Printf("fix: %v", err)
@@ -549,7 +594,11 @@ func (a *Agent) fix() {
 	if stopping == nil {
 		stopping = func() bool { return false }
 	}
-	remediate.UserFlow(exe, a.log, func(busy bool) {
+	userFlow := a.userFlow
+	if userFlow == nil {
+		userFlow = remediate.UserFlow
+	}
+	userFlow(exe, a.log, func(busy bool) {
 		if busy {
 			a.ui.Show(fixingSpec(cfg))
 		} else {

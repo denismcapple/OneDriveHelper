@@ -172,7 +172,7 @@ func (m *Manager) trayProc(hwnd, message, wParam, lParam uintptr) (uintptr, bool
 		switch lParam & 0xFFFF {
 		case wmLButtonUpT:
 			if f := m.tray.spec.OnClick; f != nil {
-				go f()
+				go safeRun(f)
 			}
 		case wmRButtonUpT:
 			m.trayMenu()

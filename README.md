@@ -82,7 +82,7 @@ Click it to see the status window (the screenshot at the top of this page). Righ
 Fixing a broken folder means deleting it from the PC, so we were careful:
 
 1. **The user confirms.** They're told which folders will be fixed and whether each one can be reconnected automatically.
-2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it.
+2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it. If nobody answers within 15 minutes, the user is told nothing changed (event 5010); the approval window closes itself after 10 minutes, and a late approval does nothing.
 3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told to close it and try again; other folders carry on.
 4. **Files are saved.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts. Each copy is written to disk, its size checked, and the original is confirmed unchanged while it was being read.
 5. **Only proven copies are deleted.** Before deleting anything, every file is checked again: it must have been copied in this run and be unchanged since, and nothing may have it open for writing. If even one file doesn't pass (or anything new appeared), nothing is deleted and the folder is put back where it was. If OneDrive has started syncing the old location again in the meantime, both copies are kept. A `manifest.json` records every step, before it happens.
@@ -154,6 +154,8 @@ This will:
 Within a few seconds the service starts the user part in every signed-in session.
 
 Running `install` again is also how you **upgrade**. It stops the service, waits for the user parts to close, swaps the files and starts it again. Your settings are kept unless you pass a new `--config`.
+
+An upgrade is all or nothing for the programs. The new files are copied next to the old ones first, and swapped in only when all of them are ready. If anything fails along the way, including the new service not starting, the previous programs are put back and started again. Settings from `--config` are checked before anything is stopped, but they aren't rolled back.
 
 If a user's fix is moving or deleting files at that moment, the installer waits for it to finish, for up to 30 minutes, before stopping anything (event 1002). After 30 minutes it goes ahead and logs 1003; the interrupted fix is put back or reported when the user part next starts. The first upgrade onto version 0.8.0 also waits for older user parts to exit by themselves, because they don't announce a running fix.
 
@@ -381,6 +383,8 @@ And for information, if you want the full picture:
 | 5006 | Warning | A folder was skipped because it is open in another program |
 | 5007 | Information | An interrupted fix was undone: the folder was put back |
 | 5008 | Warning | OneDrive started syncing a folder's location again during the fix; nothing was deleted and both copies were kept |
+| 5010 | Information | Nobody answered the fix approval in time; nothing changed |
+| 3007 | Warning | The list of running programs couldn't be read 5 checks in a row, so OneDrive Helper can't tell whether OneDrive is running (no restart or alert happens while it can't tell) |
 
 A fix where folders were only skipped, kept or left alone logs those per-folder events, not 5003.
 
@@ -416,7 +420,7 @@ These need no admin rights; run them as the user:
 & "C:\Program Files\OneDriveHelper\OneDriveHelperAgent.exe" test-popup       # show the alerts
 ```
 
-Log files:
+Log files (each rotates to `<name>.1` at 5 MB, so a log never takes more than about 10 MB):
 
 * the user part: `%LOCALAPPDATA%\OneDriveHelper\agent.log`
 * the service: `%ProgramData%\OneDriveHelper\service.log`

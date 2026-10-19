@@ -9,6 +9,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
+	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
@@ -82,6 +83,43 @@ func TestParseDeadline(t *testing.T) {
 		if got := ParseDeadline(bad, start); !got.Equal(start.Add(approvalDeadline)) {
 			t.Errorf("%q: %v", bad, got)
 		}
+	}
+}
+
+// A panic inside Execute (after the folder was staged) unwinds UserFlow:
+// the fix lock is released, nothing more runs, and recovery puts the folder back.
+func TestPanicDuringExecuteReleasesLockAndIsRecoverable(t *testing.T) {
+	e, _ := testEnv(t)
+	f := newFixture(t, three)
+	e.beforeCheck = func(string) { panic("crash after copying") }
+	saved := flow
+	defer func() { flow = saved }()
+	flow = defaultFlowEnv()
+	flow.target = func() (Target, error) { return f.plan.Target, nil }
+	flow.recover = func(Target, *log.Logger) {}
+	flow.plan = func(Target, config.Config) (*Plan, error) { return f.plan, nil }
+	flow.elevate = func(string, []string, time.Time) (uint32, error, <-chan struct{}) {
+		done := make(chan struct{})
+		close(done)
+		return ExitApproved, nil, done
+	}
+	resynced := false
+	flow.resync = func([]onedrive.Orphan, *log.Logger) { resynced = true }
+	flow.info, flow.warn, flow.fail = func(string, string) {}, func(string, string) {}, func(string, string) {}
+	flow.confirm = func(string, string) bool { return true }
+	func() {
+		defer func() { recover() }()
+		UserFlow("agent.exe", discard, func(bool) {}, func() bool { return false })
+	}()
+	if ipc.FixInProgress() {
+		t.Error("the fix lock must be released by the panic unwinding")
+	}
+	if resynced {
+		t.Error("nothing may run after the panic")
+	}
+	*e = defaultEnvForRecovery(e)
+	if left := Recover(f.plan.Target, discard, nil); len(left) != 0 || len(readAll(t, f.lib())) != 3 {
+		t.Errorf("recovery should put the folder back: left %+v, files %v", left, readAll(t, f.lib()))
 	}
 }
 
