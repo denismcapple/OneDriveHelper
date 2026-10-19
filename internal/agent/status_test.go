@@ -106,7 +106,7 @@ func TestExplanationsAndHelpLinks(t *testing.T) {
 	}
 	var got []string
 	a := Actions{Explain: func(topic string) { got = append(got, topic) }}
-	notRunningSpec(cfg, a).OnHelp()
+	notRunningSpec(cfg, a, false).OnHelp()
 	orphanSpec(cfg, sampleOrphans(), a).OnHelp()
 	if strings.Join(got, ",") != topicNotRunning+","+topicOrphans {
 		t.Errorf("help links wired to %v", got)

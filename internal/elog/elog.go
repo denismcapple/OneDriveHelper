@@ -21,13 +21,17 @@ const (
 	OneDriveRelaunched   = 3002
 	OneDriveAlertSnoozed = 3003
 	OneDriveRecovered    = 3004
-	OrphanedLibraries    = 4001
-	OrphansResolved      = 4002
-	RemediationStarted   = 5001
-	RemediationCompleted = 5002
-	RemediationFailed    = 5003
-	RemediationCancelled = 5004
-	ResyncRequested      = 5005
+	// OneDriveAutoRestarted: OneDrive had stopped and an automatic restart worked.
+	OneDriveAutoRestarted = 3005
+	// OneDriveAutoRestartFailed: automatic restarts didn't work; the user was warned.
+	OneDriveAutoRestartFailed = 3006
+	OrphanedLibraries         = 4001
+	OrphansResolved           = 4002
+	RemediationStarted        = 5001
+	RemediationCompleted      = 5002
+	RemediationFailed         = 5003
+	RemediationCancelled      = 5004
+	ResyncRequested           = 5005
 )
 
 // Log is a best-effort event log writer; a nil or failed log silently drops events.

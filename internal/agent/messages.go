@@ -16,6 +16,9 @@ const (
 
 	defaultNotRunning = "Your files are NOT being synced or backed up. OneDrive has closed, possibly after an update.\n\n" +
 		"Click 'Restart OneDrive' to fix this now."
+	defaultAutoRestartFailed = "Your files are NOT being synced or backed up. OneDrive has closed, and it didn't start again " +
+		"when we tried to restart it automatically.\n\n" +
+		"Click 'Restart OneDrive' to try again. If it still won't start, please contact support."
 	defaultOrphan = "These folders are still on your PC, but changes saved in them are NOT uploaded or backed up."
 
 	maxListed = 6
@@ -79,11 +82,17 @@ func supportButton(c config.Config, a Actions) popup.Button {
 	return popup.Button{Label: "Contact support", Menu: menu} // the card stays open
 }
 
-func notRunningSpec(c config.Config, a Actions) popup.Spec {
+// notRunningSpec is the "OneDrive is not running" alert. autoFailed says the
+// automatic restarts were tried and didn't work.
+func notRunningSpec(c config.Config, a Actions, autoFailed bool) popup.Spec {
+	body := defaultNotRunning
+	if autoFailed {
+		body = defaultAutoRestartFailed
+	}
 	s := popup.Spec{
 		ID: idNotRunning, Severity: popup.Warning, Brand: c.Title(), Sound: c.PopupSound, Accent: c.AccentColor,
 		Title:  "OneDrive is not running",
-		Body:   or(c.NotRunningMessage, defaultNotRunning),
+		Body:   or(c.NotRunningMessage, body),
 		OnHelp: func() { a.Explain(topicNotRunning) },
 	}
 	if b, ok := ignoreButton(c, a, idNotRunning); ok {
@@ -144,5 +153,5 @@ func fixingSpec(c config.Config) popup.Spec {
 
 // SampleSpecs returns both alerts with the given actions (used by previews).
 func SampleSpecs(c config.Config, orphans []onedrive.Orphan, a Actions) []popup.Spec {
-	return []popup.Spec{orphanSpec(c, orphans, a), notRunningSpec(c, a)}
+	return []popup.Spec{orphanSpec(c, orphans, a), notRunningSpec(c, a, c.AutoRestartEnabled)}
 }

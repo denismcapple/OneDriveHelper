@@ -16,6 +16,13 @@ const (
 
 const explainTitle = "What does this mean?"
 
+func autoRestartNote(c config.Config) string {
+	if !c.AutoRestartEnabled {
+		return ""
+	}
+	return "We already tried to restart it for you automatically, but it didn't start.\n\n"
+}
+
 // Explain returns the plain-English explanation for a topic, written for
 // people who don't know (or care) how OneDrive works.
 func Explain(c config.Config, topic string, orphans []onedrive.Orphan) string {
@@ -24,6 +31,7 @@ func Explain(c config.Config, topic string, orphans []onedrive.Orphan) string {
 		return "WHAT HAS HAPPENED?\n" +
 			"OneDrive is the program that copies your work files to the cloud, so they are kept safe and your colleagues can see them. " +
 			"It has stopped running on this computer. This often happens after it updates itself and doesn't start again.\n\n" +
+			autoRestartNote(c) +
 			"WHY ARE WE TELLING YOU?\n" +
 			"While OneDrive is stopped, nothing you save is copied to the cloud, and there is nothing else on screen to warn you.\n\n" +
 			"WHY DOES IT NEED FIXING?\n" +

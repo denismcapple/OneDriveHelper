@@ -31,7 +31,7 @@ var layout = [][]struct {
 		{"Alert text (leave blank for the built-in wording)", []string{"NotRunningMessage", "OrphanMessage"}},
 	},
 	{
-		{"OneDrive running check", []string{"OneDriveCheckEnabled", "OneDriveMissingGraceSeconds", "IgnoreOptions"}},
+		{"OneDrive running check", []string{"OneDriveCheckEnabled", "OneDriveMissingGraceSeconds", "AutoRestartEnabled", "AutoRestartAttempts", "IgnoreOptions"}},
 		{"Library sync check", []string{"OrphanCheckEnabled", "RemediationEnabled", "BackupRoot", "FreeSpaceMarginMB"}},
 		{"General", []string{"TrayIconEnabled", "PopupSound", "CheckIntervalSeconds", "AgentWatchdogSeconds"}},
 	},
@@ -97,7 +97,7 @@ func Run(file string) error {
 		return errors.New("RegisterClassEx failed")
 	}
 
-	w, h := f.s(1000), f.s(600)
+	w, h := f.s(1000), f.s(660)
 	if len(config.PolicyOverrides()) > 0 {
 		h += f.s(40)
 	}

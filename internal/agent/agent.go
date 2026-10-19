@@ -52,10 +52,13 @@ type Agent struct {
 	profile string
 	appData string
 	user    string
+	launch  func() error // starts OneDrive (replaceable in tests)
 
 	mu           sync.Mutex // guards the fields below (buttons run on other goroutines)
 	missingSince time.Time
 	outageLogged bool
+	restarts     []time.Time // automatic restart attempts (kept for autoRestartWindow)
+	autoGaveUp   bool        // automatic restarts exhausted for the current outage
 	orphanKey    string
 	fixing       bool
 	last         Status // latest check, for the tray menu and explanations
@@ -166,8 +169,72 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 				return nil
 			}
 		}
-		timer.Reset(cfg.CheckInterval())
+		interval := cfg.CheckInterval()
+		if a.restartPending() && interval > autoRestartSpacing {
+			interval = autoRestartSpacing // check back soon after an automatic restart
+		}
+		timer.Reset(interval)
 	}
+}
+
+const (
+	// autoRestartSpacing is the minimum gap between automatic restart attempts
+	// (time for OneDrive to start, or for the next attempt).
+	autoRestartSpacing = 30 * time.Second
+	// autoRestartWindow limits automatic restarts to cfg.AutoRestartAttempts in
+	// this period, so a OneDrive that keeps crashing ends in a warning rather
+	// than an endless restart loop.
+	autoRestartWindow = 30 * time.Minute
+)
+
+// restartPending reports an outage in which automatic restarts are still in progress.
+func (a *Agent) restartPending() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.outageLogged && !a.autoGaveUp && len(a.restarts) > 0
+}
+
+// recentRestarts drops attempts older than the window and returns the rest.
+func recentRestarts(times []time.Time, now time.Time) []time.Time {
+	var out []time.Time
+	for _, t := range times {
+		if now.Sub(t) < autoRestartWindow {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// tryAutoRestart decides whether to restart OneDrive now. It returns true
+// while automatic restarts are still being tried (so no warning is shown yet).
+// Must be called with a.mu held.
+func (a *Agent) tryAutoRestart(cfg config.Config, now time.Time) bool {
+	if !cfg.AutoRestartEnabled || a.autoGaveUp {
+		return false
+	}
+	a.restarts = recentRestarts(a.restarts, now)
+	if n := len(a.restarts); n > 0 && now.Sub(a.restarts[n-1]) < autoRestartSpacing {
+		return true // the last attempt may still be starting up
+	}
+	if len(a.restarts) >= cfg.AutoRestartAttempts {
+		a.autoGaveUp = true
+		a.log.Printf("OneDrive could not be restarted automatically (%d attempts in %s); showing the warning", len(a.restarts), autoRestartWindow)
+		a.ev.Warning(elog.OneDriveAutoRestartFailed, fmt.Sprintf("OneDrive could not be restarted automatically for %s after %d attempts. The user has been warned.",
+			a.user, len(a.restarts)))
+		return false
+	}
+	a.restarts = append(a.restarts, now)
+	attempt := len(a.restarts)
+	launch := a.launch
+	if launch == nil {
+		launch = func() error { return onedrive.LaunchOneDrive(a.hive) }
+	}
+	if err := launch(); err != nil {
+		a.log.Printf("automatic restart %d/%d failed: %v", attempt, cfg.AutoRestartAttempts, err)
+	} else {
+		a.log.Printf("OneDrive was not running; automatic restart %d/%d", attempt, cfg.AutoRestartAttempts)
+	}
+	return true
 }
 
 // waitForFix blocks while a fix is running so files are never left half-moved.
@@ -243,10 +310,15 @@ func (a *Agent) checkOneDrive(cfg config.Config, now time.Time) {
 	defer a.mu.Unlock()
 	if onedrive.OneDriveRunning(a.session) {
 		if a.outageLogged {
-			a.ev.Info(elog.OneDriveRecovered, "OneDrive is running again for "+a.user+".")
-			a.log.Printf("OneDrive is running again")
+			if n := len(recentRestarts(a.restarts, now)); n > 0 && !a.autoGaveUp {
+				a.ev.Info(elog.OneDriveAutoRestarted, fmt.Sprintf("OneDrive had stopped for %s and was restarted automatically (attempt %d).", a.user, n))
+				a.log.Printf("OneDrive restarted automatically (attempt %d)", n)
+			} else {
+				a.ev.Info(elog.OneDriveRecovered, "OneDrive is running again for "+a.user+".")
+				a.log.Printf("OneDrive is running again")
+			}
 		}
-		a.missingSince, a.outageLogged = time.Time{}, false
+		a.missingSince, a.outageLogged, a.autoGaveUp = time.Time{}, false, false
 		a.ui.Hide(idNotRunning)
 		return
 	}
@@ -267,10 +339,14 @@ func (a *Agent) checkOneDrive(cfg config.Config, now time.Time) {
 		a.ev.Warning(elog.OneDriveNotRunning, fmt.Sprintf("OneDrive is not running for %s (session %d) since %s.",
 			a.user, a.session, a.missingSince.Format(time.RFC3339)))
 	}
-	if Snoozed(a.hive, idNotRunning, now, winapi.BootTime()) || a.ui.Visible(idNotRunning) {
+	// "Ignore" means the user may have closed OneDrive on purpose: leave it alone.
+	if Snoozed(a.hive, idNotRunning, now, winapi.BootTime()) {
 		return
 	}
-	a.ui.Show(notRunningSpec(cfg, a.actions()))
+	if a.tryAutoRestart(cfg, now) || a.ui.Visible(idNotRunning) {
+		return
+	}
+	a.ui.Show(notRunningSpec(cfg, a.actions(), cfg.AutoRestartEnabled && a.autoGaveUp))
 }
 
 func (a *Agent) checkOrphans(cfg config.Config, now time.Time, orphans []onedrive.Orphan) {

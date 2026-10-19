@@ -38,7 +38,7 @@ func DocSpecs(c config.Config) map[string]popup.Spec {
 	broken := Status{At: time.Now(), Configured: true, Running: false, MissingSince: time.Now().Add(-7 * time.Minute), Orphans: orphans}
 	healthy := Status{At: time.Now(), Configured: true, Running: true}
 	return map[string]popup.Spec{
-		"alert-onedrive-not-running": notRunningSpec(c, nop),
+		"alert-onedrive-not-running": notRunningSpec(c, nop, true),
 		"alert-folders-not-syncing":  orphanSpec(c, orphans, nop),
 		"status-problems":            statusSpec(c, broken, nop),
 		"status-all-good":            statusSpec(c, healthy, nop),

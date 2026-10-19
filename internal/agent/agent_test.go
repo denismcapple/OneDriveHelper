@@ -44,7 +44,7 @@ func TestNotRunningSpec(t *testing.T) {
 	var snoozed []string
 	relaunched := false
 	a := Actions{Relaunch: func() { relaunched = true }, Snooze: func(id, d string) { snoozed = append(snoozed, id+":"+d) }}
-	s := notRunningSpec(config.Defaults(), a)
+	s := notRunningSpec(config.Defaults(), a, false)
 	if len(s.Buttons) != 2 || !s.Buttons[1].Primary || s.Buttons[1].Label != "Restart OneDrive" {
 		t.Fatalf("buttons: %+v", s.Buttons)
 	}
@@ -66,7 +66,7 @@ func TestNotRunningSpec(t *testing.T) {
 
 	cfg := config.Defaults()
 	cfg.IgnoreOptions, cfg.NotRunningMessage, cfg.CompanyName = "", "Call us!", "Contoso"
-	s = notRunningSpec(cfg, a)
+	s = notRunningSpec(cfg, a, true)
 	if len(s.Buttons) != 1 || s.Body != "Call us!" || s.Brand != "Contoso - OneDrive Helper" {
 		t.Errorf("no ignore button / custom text / company title expected: %+v", s)
 	}

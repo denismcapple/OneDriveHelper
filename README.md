@@ -10,7 +10,7 @@ A small Windows tool that keeps an eye on OneDrive for your users, and tells the
 
 We look after a lot of Microsoft 365 users, and the same two OneDrive problems kept landing on our desk. Both are silent. Nothing on screen tells the user, so we usually only found out when someone went looking for a file that had never made it to the cloud.
 
-**1. OneDrive just stops.** OneDrive updates itself, closes, and sometimes simply doesn't come back. The cloud icon disappears from the taskbar and nobody notices. Until the user reboots or starts OneDrive by hand, nothing they save is backed up and their colleagues don't see their changes.
+**1. OneDrive just stops.** OneDrive updates itself, closes, and sometimes simply doesn't come back. The cloud icon disappears from the taskbar and nobody notices. Until the user reboots or starts OneDrive by hand, nothing they save is backed up and their colleagues don't see their changes. Now it just gets started again.
 
 **2. Folders that look synced but aren't.** A SharePoint or Teams library (for example `C:\Users\jsmith\Fabrikam\Projects - Documents`) is still sitting on the disk, but OneDrive has stopped syncing it. This happens when someone adds a shortcut to the same library, when an organisation is renamed, when an account is removed, or for reasons nobody can explain. The folder looks exactly like it always did. People keep saving work into it for weeks, and none of it goes anywhere.
 
@@ -18,7 +18,7 @@ We got tired of finding out about these the hard way, so we wrote something that
 
 ## What it does
 
-* **Watches OneDrive for every signed-in user.** If OneDrive isn't running for a couple of minutes (and isn't in the middle of an update), the user gets an alert with a **Restart OneDrive** button.
+* **Watches OneDrive for every signed-in user, and restarts it when it stops.** If OneDrive isn't running for a couple of minutes (and isn't in the middle of an update), it's quietly restarted, with up to 3 tries about 30 seconds apart. Most of the time the user never knows anything happened. Only if that doesn't work do they get an alert with a **Restart OneDrive** button.
 * **Finds folders that have stopped syncing.** It compares what's on disk with what OneDrive is actually syncing. It catches:
   * library folders OneDrive has dropped
   * leftover organisation folders
@@ -34,7 +34,15 @@ It's written in Go, runs as a normal Windows service, and has no dependencies to
 
 ## What users see
 
-**When OneDrive has stopped**
+**When OneDrive has stopped and couldn't be restarted automatically**
+
+If OneDrive closes, the tool first restarts it by itself, up to 3 attempts, and logs event 3005 when that works. Users only see this alert if every attempt failed.
+
+A few rules keep this sensible:
+
+* If OneDrive keeps crashing straight after starting, the automatic restarts stop after 3 in any 30 minutes, and the user is warned instead of the tool fighting it forever.
+* If the user has chosen **Ignore** on this alert (maybe they closed OneDrive on purpose), it isn't restarted behind their back until the ignore period ends.
+* Both the automatic restart and the number of attempts can be changed in the settings.
 
 <img src="docs/images/alert-onedrive-not-running.png" width="477" alt="OneDrive is not running alert">
 
@@ -210,7 +218,9 @@ Settings live in `HKLM\SOFTWARE\OneDriveHelper`. Changes are picked up within a 
 | `NotRunningMessage` | (built in) | Your own wording for the "OneDrive is not running" alert |
 | `OrphanMessage` | (built in) | Your own wording for the "folders stopped syncing" alert |
 | `OneDriveCheckEnabled` | `1` | Turn the "OneDrive not running" check on or off |
-| `OneDriveMissingGraceSeconds` | `120` | How long OneDrive must be missing before alerting (gives updates time to finish) |
+| `OneDriveMissingGraceSeconds` | `120` | How long OneDrive must be missing before anything happens (gives updates time to finish) |
+| `AutoRestartEnabled` | `1` | Quietly restart OneDrive when it has stopped, before warning the user |
+| `AutoRestartAttempts` | `3` | How many automatic restarts to try, about 30 seconds apart, before warning the user (1 to 10). It's also the most automatic restarts allowed in any 30 minutes |
 | `IgnoreOptions` | `5m,30m,reboot` | Choices in the Ignore menu. Durations from 1m to 24h, and/or `reboot`. Leave it empty to remove the Ignore button |
 | `OrphanCheckEnabled` | `1` | Turn the "folders not syncing" check on or off |
 | `RemediationEnabled` | `1` | Offer the **Fix (admin)** button |
@@ -239,15 +249,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.6.1; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.7.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.6.1'
+$Version = 'v0.7.0'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = '4A4D84C1199CE10ABB5BD1B31153CC798ACDDF862A09BEE8CFA2564431EB8A44'
-    'arm64' = 'A6FBE9458297EF2C19B3632FA9B979C718805690F57D9B8A266A43D7DFED0FBF'
+    'x64'   = '482753930345CC9A2F21010600E36A1A66B2F840887BA19D23AB79304D7F17B0'
+    'arm64' = 'FF7F5C0027D8C77406C5D69156E516909CC5D03B1430387033BA1E88F51B229B'
 }
 $Settings = @'
 {
@@ -331,7 +341,8 @@ Everything important goes to the **Application** event log under the source **On
 
 | Event ID | Level | Meaning |
 |---|---|---|
-| 3001 | Warning | OneDrive has not been running for a user, past the grace period |
+| 3001 | Warning | OneDrive has not been running for a user, past the grace period (automatic restarts start now) |
+| 3006 | Warning | OneDrive couldn't be restarted automatically, so the user has been warned |
 | 4001 | Warning | Folders found that aren't syncing (the paths are in the message) |
 | 5003 | Error | A fix failed or only partly worked |
 | 1101 | Error | The service couldn't start the user part in a session |
@@ -346,6 +357,7 @@ And for information, if you want the full picture:
 | 3002 | The user restarted OneDrive from the alert |
 | 3003 | The user chose to ignore an alert, and for how long |
 | 3004 | OneDrive is running again |
+| 3005 | OneDrive had stopped and was restarted automatically (with the attempt number) |
 | 4002 | No more broken folders |
 | 5001 | A fix was approved (who approved it, and the plan) |
 | 5002 | A fix completed |

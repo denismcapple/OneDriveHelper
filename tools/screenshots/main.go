@@ -49,6 +49,11 @@ var (
 
 type rect struct{ L, T, R, B int32 }
 
+var (
+	pGetClientRect  = user32.NewProc("GetClientRect")
+	pClientToScreen = user32.NewProc("ClientToScreen")
+)
+
 func main() {
 	out := flag.String("out", "docs/images", "output folder")
 	cfgExe := flag.String("config-exe", "dist/amd64/OneDriveHelperConfig.exe", "built settings tool (for its screenshot)")
@@ -98,7 +103,7 @@ func main() {
 		log.Printf("settings tool: %v", err)
 	} else {
 		if h := waitWindow("OneDriveHelperConfig", ""); h != 0 {
-			time.Sleep(time.Second)
+			time.Sleep(3 * time.Second) // let every control finish painting
 			save(filepath.Join(*out, "settings-tool.png"), decorate(capture(h), 8))
 		}
 		_ = cmd.Process.Kill()
@@ -124,13 +129,28 @@ func waitWindow(class, title string) uintptr {
 }
 
 // capture renders a window's own contents (no desktop, no overlapping
-// windows, no watermark) and crops the invisible resize border.
+// windows, no watermark) and crops the invisible resize border. The frame
+// comes from DWM (modern title bar); the inside is painted by the window
+// itself, because DWM's copy can be missing controls that haven't been
+// composed yet.
 func capture(h uintptr) *image.RGBA {
 	var wr, vis rect
 	pGetWindowRect.Call(h, uintptr(unsafe.Pointer(&wr)))
 	vis = wr
 	pDwmGetWindowAtt.Call(h, 9, uintptr(unsafe.Pointer(&vis)), unsafe.Sizeof(vis)) // DWMWA_EXTENDED_FRAME_BOUNDS
-	w, ht := int(wr.R-wr.L), int(wr.B-wr.T)
+	full := printWindow(h, int(wr.R-wr.L), int(wr.B-wr.T), 2)                      // PW_RENDERFULLCONTENT
+	var cr rect
+	pGetClientRect.Call(h, uintptr(unsafe.Pointer(&cr)))
+	var org struct{ X, Y int32 }
+	pClientToScreen.Call(h, uintptr(unsafe.Pointer(&org)))
+	client := printWindow(h, int(cr.R), int(cr.B), 1) // PW_CLIENTONLY
+	off := image.Pt(int(org.X-wr.L), int(org.Y-wr.T))
+	draw.Draw(full, client.Bounds().Add(off), client, image.Point{}, draw.Src)
+	crop := image.Rect(int(vis.L-wr.L), int(vis.T-wr.T), int(vis.R-wr.L), int(vis.B-wr.T))
+	return full.SubImage(crop).(*image.RGBA)
+}
+
+func printWindow(h uintptr, w, ht int, flags uintptr) *image.RGBA {
 	screen, _, _ := pGetDC.Call(0)
 	defer pReleaseDC.Call(0, screen)
 	dc, _, _ := pCreateCompatDC.Call(screen)
@@ -149,15 +169,14 @@ func capture(h uintptr) *image.RGBA {
 	bmp, _, _ := pCreateDIB.Call(screen, uintptr(unsafe.Pointer(&hdr)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
 	defer pDeleteObject.Call(bmp)
 	old, _, _ := pSelectObject.Call(dc, bmp)
-	pPrintWindow.Call(h, dc, 2) // PW_RENDERFULLCONTENT
+	pPrintWindow.Call(h, dc, flags)
 	pSelectObject.Call(dc, old)
 	px := unsafe.Slice((*uint32)(bits), w*ht)
 	img := image.NewRGBA(image.Rect(0, 0, w, ht))
 	for i, v := range px {
 		img.Pix[i*4], img.Pix[i*4+1], img.Pix[i*4+2], img.Pix[i*4+3] = byte(v>>16), byte(v>>8), byte(v), 0xFF
 	}
-	crop := image.Rect(int(vis.L-wr.L), int(vis.T-wr.T), int(vis.R-wr.L), int(vis.B-wr.T))
-	return img.SubImage(crop).(*image.RGBA)
+	return img
 }
 
 // decorate rounds the corners and adds a soft drop shadow on a transparent

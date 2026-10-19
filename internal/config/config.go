@@ -48,6 +48,8 @@ type Config struct {
 	// OneDrive running check
 	OneDriveCheckEnabled        bool   `reg:"OneDriveCheckEnabled" def:"1" label:"Alert when OneDrive is not running" help:"Alert when OneDrive.exe is not running for a user with OneDrive set up."`
 	OneDriveMissingGraceSeconds int    `reg:"OneDriveMissingGraceSeconds" def:"120" min:"0" max:"3600" label:"Wait before alerting (seconds)" help:"How long OneDrive must be missing before alerting (covers updates/restarts)."`
+	AutoRestartEnabled          bool   `reg:"AutoRestartEnabled" def:"1" label:"Restart OneDrive automatically" help:"When OneDrive has stopped, quietly restart it before warning the user. The warning only appears if the restarts don't work."`
+	AutoRestartAttempts         int    `reg:"AutoRestartAttempts" def:"3" min:"1" max:"10" label:"Automatic restart attempts" help:"How many automatic restarts to try (about 30 seconds apart) before warning the user. Also the most automatic restarts allowed in any 30 minutes, so a OneDrive that keeps crashing ends in a warning."`
 	IgnoreOptions               string `reg:"IgnoreOptions" def:"5m,30m,reboot" label:"'Ignore' choices" help:"Choices in every alert's Ignore menu (each alert is ignored separately). Comma-separated: durations like 5m, 30m, 2h, and/or 'reboot' (until next restart). Empty = no Ignore button."`
 
 	// Library sync check
