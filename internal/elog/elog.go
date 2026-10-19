@@ -45,6 +45,8 @@ const (
 	FixInterrupted = 5007
 	// FixReregistered: OneDrive is syncing the original location again; the local copy was kept.
 	FixReregistered = 5008
+	// ApprovalTimedOut: nobody answered the approval in time; nothing changed.
+	ApprovalTimedOut = 5010
 	// FixStarted: the file work of an approved fix started.
 	FixStarted = 5011
 	// FixKept: a folder was left in the staging area; the message names it.
