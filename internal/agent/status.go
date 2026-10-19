@@ -220,12 +220,20 @@ func PreviewStatus(ui *popup.Manager, c config.Config) {
 	}}
 	nop := Actions{Relaunch: func() {}, Snooze: func(string, string) {}, Support: func() {}, Email: func() {}, Website: func() {},
 		Fix: func() {}, Explain: func(string) {}, CopyDetails: func() {}}
-	ui.SetTray(popup.Tray{Tooltip: c.Title() + "\n" + s.summary(), Severity: s.severity()})
+	ui.SetTray(popup.Tray{Tooltip: trayTooltip(c, s), Severity: s.severity()})
 	ui.Show(orphanSpec(c, s.Orphans, nop))
 	ui.Show(statusSpec(c, s, nop))
 }
 
 // --- tray ---
+
+// trayTooltip is shown when hovering over the tray icon, e.g.
+// "Contoso - OneDrive Helper v0.7.1" / "Everything looks good".
+// (Windows shows at most 127 characters; the summary is last so the name and
+// version are never cut off.)
+func trayTooltip(c config.Config, s Status) string {
+	return c.Title() + " v" + version.Version + "\n" + s.summary()
+}
 
 func (a *Agent) updateTray(cfg config.Config, s Status) {
 	if !cfg.TrayIconEnabled {
@@ -233,7 +241,7 @@ func (a *Agent) updateTray(cfg config.Config, s Status) {
 		return
 	}
 	a.ui.SetTray(popup.Tray{
-		Tooltip:  cfg.Title() + "\n" + s.summary(),
+		Tooltip:  trayTooltip(cfg, s),
 		Severity: s.severity(),
 		OnClick:  a.showStatus,
 		Menu:     a.trayMenu,
