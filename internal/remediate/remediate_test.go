@@ -8,7 +8,7 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 )
 
-func TestCopyAndDeleteTree(t *testing.T) {
+func TestCopyRecordedThenVerifiedDelete(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	must(t, os.MkdirAll(filepath.Join(src, "a", "b"), 0o755))
@@ -20,14 +20,19 @@ func TestCopyAndDeleteTree(t *testing.T) {
 		t.Fatalf("scan: %+v", st)
 	}
 	dst := filepath.Join(root, "dst")
-	if st, _ := CopyLocal(src, dst); len(st.Errors) != 0 {
-		t.Fatalf("copy errors: %v", st.Errors)
+	rec, st, _ := copyRecorded(src, dst)
+	if len(st.Errors) != 0 || len(rec) != 5 || !rec[`a\b\deep.txt`].Verified {
+		t.Fatalf("copy: %v %+v", st.Errors, rec)
 	}
 	if b, err := os.ReadFile(filepath.Join(dst, "a", "b", "deep.txt")); err != nil || string(b) != "world!" {
 		t.Fatalf("copied content: %q %v", b, err)
 	}
-	if err := DeleteTree(src); err != nil {
-		t.Fatalf("delete: %v", err)
+	v, why := checkForDelete(src, rec)
+	if why != "" {
+		t.Fatal(why)
+	}
+	if rest, err := deleteVerified(src, v, rec); err != nil {
+		t.Fatalf("delete: %v (remaining %v)", err, rest)
 	}
 	if exists(src) {
 		t.Fatal("source still exists")

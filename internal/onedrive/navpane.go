@@ -49,6 +49,9 @@ func StaleNavEntries(h Hive, in Inputs, exists func(string) bool) []NavEntry {
 	if exists == nil {
 		exists = func(p string) bool { _, err := os.Stat(p); return err == nil }
 	}
+	if len(in.ReadErrors) > 0 {
+		return nil // can't tell which folders are in use
+	}
 	return staleFrom(NavEntries(h), in.ActivePaths(), exists)
 }
 

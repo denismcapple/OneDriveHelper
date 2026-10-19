@@ -1,0 +1,45 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: "0"
+      GOOS: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        shell: pwsh
+        run: |
+          $out = gofmt -l .
+          if ($out) { Write-Output "These files need gofmt:"; $out; exit 1 }
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./...
+
+      - name: build arm64
+        shell: pwsh
+        env:
+          GOARCH: arm64
+        run: |
+          go build -trimpath -o $env:RUNNER_TEMP\OneDriveHelper.exe ./cmd/OneDriveHelper
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          go build -trimpath -ldflags "-H=windowsgui" -o $env:RUNNER_TEMP\OneDriveHelperAgent.exe ./cmd/OneDriveHelperAgent
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          go build -trimpath -ldflags "-H=windowsgui" -o $env:RUNNER_TEMP\OneDriveHelperConfig.exe ./cmd/OneDriveHelperConfig
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

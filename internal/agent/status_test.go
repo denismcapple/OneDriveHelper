@@ -10,6 +10,7 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/popup"
+	"github.com/denismcapple/OneDriveHelper/internal/version"
 )
 
 func sampleOrphans() []onedrive.Orphan {
@@ -86,6 +87,20 @@ func TestReport(t *testing.T) {
 		if !strings.Contains(r, want) {
 			t.Errorf("report missing %q:\n%s", want, r)
 		}
+	}
+}
+
+func TestTrayTooltipShowsVersion(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.CompanyName = "Contoso"
+	tip := trayTooltip(cfg, Status{Configured: true, Running: true})
+	if want := "Contoso - OneDrive Helper v" + version.Version + "\nEverything looks good"; tip != want {
+		t.Errorf("tooltip %q, want %q", tip, want)
+	}
+	cfg.CompanyName = "A Very Long Company Name Limited Trading As Something"
+	s := Status{Configured: true, Orphans: sampleOrphans()}
+	if tip := trayTooltip(cfg, s); len([]rune(tip)) > 127 {
+		t.Errorf("tooltip too long for Windows (%d chars): %q", len([]rune(tip)), tip)
 	}
 }
 

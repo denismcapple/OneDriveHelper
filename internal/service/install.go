@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -17,7 +16,6 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
-	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/version"
 )
 
@@ -53,13 +51,19 @@ func Install(configFile string, logf func(string, ...any)) error {
 		return err
 	}
 	defer m.Disconnect()
+	// Never interrupt a fix that is moving or deleting a user's files: wait
+	// for it first (up to fixWaitCap), before stopping anything.
+	w := realWaitEnv(logf)
+	deadline := w.now().Add(fixWaitCap)
+	legacy := installedPredatesFixLock()
+	w.waitForFix(deadline)
 	existing, err := m.OpenService(version.ServiceName)
 	if err == nil {
 		logf("Stopping existing service for upgrade...")
 		_ = stopAndWait(existing)
 		existing.Close()
 	}
-	stopAgents(logf)
+	w.stopAgents(deadline, legacy)
 
 	if !strings.EqualFold(filepath.Clean(srcDir), filepath.Clean(dir)) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -138,45 +142,6 @@ func Install(configFile string, logf func(string, ...any)) error {
 	return nil
 }
 
-// stopAgents waits for user agents to exit after the service has stopped
-// (current agents exit as soon as the service signals them) and terminates
-// any that are still running after 20 seconds, e.g. agents from versions
-// that predate the stop signal. Without this an old agent keeps its session
-// "occupied" and the new version is never started there.
-func stopAgents(logf func(string, ...any)) {
-	agents := func() []uint32 {
-		procs, _ := onedrive.Processes()
-		var pids []uint32
-		for _, p := range procs {
-			if strings.EqualFold(p.Name, version.AgentExe) {
-				pids = append(pids, p.PID)
-			}
-		}
-		return pids
-	}
-	pids := agents()
-	if len(pids) == 0 {
-		return
-	}
-	logf("Waiting for %d user agent(s) to exit...", len(pids))
-	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && len(pids) > 0; pids = agents() {
-		time.Sleep(500 * time.Millisecond)
-	}
-	for _, pid := range pids {
-		h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, pid)
-		if err == nil {
-			err = windows.TerminateProcess(h, 1)
-			_, _ = windows.WaitForSingleObject(h, 5000)
-			windows.CloseHandle(h)
-		}
-		if err != nil {
-			logf("Warning: could not stop agent process %d: %v", pid, err)
-		} else {
-			logf("Stopped agent process %d (it did not exit by itself)", pid)
-		}
-	}
-}
-
 // QuotePath wraps an executable path in double quotes.
 func QuotePath(p string) string { return `"` + strings.Trim(p, `"`) + `"` }
 
@@ -189,8 +154,12 @@ func Uninstall(purge bool, logf func(string, ...any)) error {
 	}
 	defer m.Disconnect()
 	if s, err := m.OpenService(version.ServiceName); err == nil {
+		w := realWaitEnv(logf)
+		deadline := w.now().Add(fixWaitCap)
+		legacy := installedPredatesFixLock()
+		w.waitForFix(deadline)
 		_ = stopAndWait(s)
-		stopAgents(logf)
+		w.stopAgents(deadline, legacy)
 		err = s.Delete()
 		s.Close()
 		if err != nil {
@@ -199,6 +168,15 @@ func Uninstall(purge bool, logf func(string, ...any)) error {
 		logf("Service removed")
 	} else {
 		logf("Service not installed")
+	}
+	// No agent is left to recover unfinished fixes after an uninstall: warn.
+	if left := unfinishedFixes(profileDirs()); len(left) > 0 {
+		msg := "These OneDrive Helper fixes did not finish. The folders are not where they were and must be restored by hand " +
+			"(each run folder holds the folder and a manifest.json; the backups are in the user's ODHelper\\Saved folder):\r\n" + strings.Join(left, "\r\n")
+		logf("WARNING: %s", strings.ReplaceAll(msg, "\r\n", "\n  "))
+		ev := elog.Open()
+		ev.Warning(elog.FixInterrupted, msg)
+		ev.Close()
 	}
 	_ = elog.Remove()
 	if purge {
