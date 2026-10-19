@@ -83,16 +83,22 @@ Fixing a broken folder means deleting it from the PC, so we were careful:
 
 1. **The user confirms.** They're told which folders will be fixed and whether each one can be reconnected automatically.
 2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it.
-3. **Files are saved first.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts, and every copied file is size-checked.
-4. **Only then is the folder removed.** If even one file couldn't be saved, the folder is left alone. A `manifest.json` records what was done.
-5. **OneDrive is asked to sync the library again.** Where the library details are known, that's automatic. Otherwise the library's web page opens so the user can click Sync. The leftover shortcuts in Explorer's side panel are cleaned up too.
+3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told to close it and try again; other folders carry on.
+4. **Files are saved.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts. Each copy is written to disk, its size checked, and the original is confirmed unchanged while it was being read.
+5. **Only proven copies are deleted.** Before deleting anything, every file is checked again: it must have been copied in this run and be unchanged since, and nothing may have it open for writing. If even one file doesn't pass (or anything new appeared), nothing is deleted and the folder is put back where it was. If OneDrive has started syncing the old location again in the meantime, both copies are kept. A `manifest.json` records every step, before it happens.
+6. **OneDrive is asked to sync the library again**, for folders that were fully fixed. Where the library details are known, that's automatic. Otherwise the library's web page opens so the user can click Sync. The leftover shortcuts in Explorer's side panel are cleaned up too.
+
+If the fix is interrupted (a crash, a power cut, the user signing out), the record on disk points at the user's files. The next time the user part starts it either puts the folder back, or reports it once in the status window and in the event log (5007) so you can sort it out. Recovery only ever runs as the user, never with admin rights.
 
 Some safety rules that are always applied:
 
-* It never touches a folder OneDrive is actually syncing; this is checked again right before acting.
+* It never touches a folder OneDrive is actually syncing; this is checked before the folder is moved and again right before anything is deleted. If OneDrive's settings can't be read, every folder counts as "syncing".
 * It only touches folders inside the user's own profile.
 * It never touches a folder that contains the user's redirected Desktop or Documents.
-* It never follows junctions or symbolic links.
+* It never follows junctions or symbolic links, and never puts a folder back through one.
+* A delete that fails part-way (antivirus or a preview holding a file) stops at once. What wasn't deleted stays in the `Fixing` folder and is never moved back half-empty.
+
+**Clearing an unfinished fix.** If the status window or event 5007 reports an unfinished fix, the folder is in `C:\Users\<user>\ODHelper\Fixing\<date and time>\` and its backup in `ODHelper\Saved\<date and time>\`. Check the backup, copy back anything the user needs, then delete that `Fixing\<date and time>` folder. The report clears once the folder is gone.
 
 <img src="docs/images/fix-in-progress.png" width="477" alt="Fix in progress">
 
@@ -149,12 +155,16 @@ Within a few seconds the service starts the user part in every signed-in session
 
 Running `install` again is also how you **upgrade**. It stops the service, waits for the user parts to close, swaps the files and starts it again. Your settings are kept unless you pass a new `--config`.
 
+If a user's fix is moving or deleting files at that moment, the installer waits for it to finish, for up to 30 minutes, before stopping anything (event 1002). After 30 minutes it goes ahead and logs 1003; the interrupted fix is put back or reported when the user part next starts. The first upgrade onto version 0.8.0 also waits for older user parts to exit by themselves, because they don't announce a running fix.
+
 To remove it:
 
 ```powershell
 & "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" uninstall           # keeps settings
 & "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" uninstall --purge   # removes settings too
 ```
+
+Uninstall waits for a running fix in the same way. It also warns about any unfinished fix it finds in a user's `ODHelper\Fixing` folder, because after an uninstall nothing is left to put those folders back; restore them by hand from that folder.
 
 ## Configuring it
 
@@ -344,25 +354,35 @@ Everything important goes to the **Application** event log under the source **On
 | 3001 | Warning | OneDrive has not been running for a user, past the grace period (automatic restarts start now) |
 | 3006 | Warning | OneDrive couldn't be restarted automatically, so the user has been warned |
 | 4001 | Warning | Folders found that aren't syncing (the paths are in the message) |
-| 5003 | Error | A fix failed or only partly worked |
+| 5003 | Error | A fix failed: a file couldn't be saved or verified, or a delete stopped part-way (the message lists what wasn't removed) |
+| 5007 | Warning | An interrupted fix needs attention: a folder is not where it was (both paths are in the message) |
+| 5012 | Warning | A folder was kept in the `ODHelper\Fixing` area because it couldn't be put back safely (the path is in the message) |
+| 1003 | Error | The installer stopped a user part while a fix was running (after waiting 30 minutes) |
 | 1101 | Error | The service couldn't start the user part in a session |
 
 And for information, if you want the full picture:
 
-| Event ID | Meaning |
-|---|---|
-| 1000 / 1001 | Service started / stopped |
-| 1100 | User part started in a session |
-| 2000 | User part started for a user |
-| 3002 | The user restarted OneDrive from the alert |
-| 3003 | The user chose to ignore an alert, and for how long |
-| 3004 | OneDrive is running again |
-| 3005 | OneDrive had stopped and was restarted automatically (with the attempt number) |
-| 4002 | No more broken folders |
-| 5001 | A fix was approved (who approved it, and the plan) |
-| 5002 | A fix completed |
-| 5004 | A fix was declined at the approval step |
-| 5005 | OneDrive was asked to re-sync libraries |
+| Event ID | Level | Meaning |
+|---|---|---|
+| 1000 / 1001 | Information | Service started / stopped |
+| 1002 | Warning | The installer is waiting for a fix in progress |
+| 1100 | Information | User part started in a session |
+| 2000 | Information | User part started for a user |
+| 3002 | Information | The user restarted OneDrive from the alert |
+| 3003 | Information | The user chose to ignore an alert, and for how long |
+| 3004 | Information | OneDrive is running again |
+| 3005 | Information | OneDrive had stopped and was restarted automatically (with the attempt number) |
+| 4002 | Information | No more broken folders |
+| 5001 | Information | A fix was approved (who approved it, and the plan) |
+| 5011 | Information | The approved fix started working on the files (use this, not 5001, for "a fix ran") |
+| 5002 | Information | A fix completed: every folder was removed after saving it |
+| 5004 | Information | A fix was declined at the approval step |
+| 5005 | Information | OneDrive was asked to re-sync libraries |
+| 5006 | Warning | A folder was skipped because it is open in another program |
+| 5007 | Information | An interrupted fix was undone: the folder was put back |
+| 5008 | Warning | OneDrive started syncing a folder's location again during the fix; nothing was deleted and both copies were kept |
+
+A fix where folders were only skipped, kept or left alone logs those per-folder events, not 5003.
 
 ## Building from source
 
@@ -401,7 +421,7 @@ Log files:
 * the user part: `%LOCALAPPDATA%\OneDriveHelper\agent.log`
 * the service: `%ProgramData%\OneDriveHelper\service.log`
 * fix approvals: `%ProgramData%\OneDriveHelper\remediation.log`
-* each fix: a `manifest.json` in the folder where the files were saved
+* each fix: a `manifest.json` in the folder where the files were saved, and, while a fix runs or if it was interrupted, in `%USERPROFILE%\ODHelper\Fixing\<date and time>\`
 
 The quickest way to get everything in one go is the tray icon's **Copy details for support**, or **Contact support** then **Send an e-mail**.
 
@@ -450,6 +470,8 @@ There's more in [SECURITY.md](SECURITY.md), including how to report a problem.
 * Alerts appear on the main monitor only.
 * The automatic re-sync uses the same link SharePoint's **Sync** button does. OneDrive may ask the user to confirm, and a library in another organisation (as a guest) may need the user to sign in.
 * If someone moved their OneDrive folder outside their profile, problems there are reported but not fixed automatically.
+* A folder that's open in another program (a document, or an Explorer window inside it) is skipped by the fix. The user is asked to close it and try again.
+* A folder containing a junction or symbolic link inside it isn't deleted; it's put back and the reason is shown.
 * Users can turn off notifications for apps in Windows. That doesn't affect these alerts, but if they close the user part, the service just starts it again.
 
 ## Licence

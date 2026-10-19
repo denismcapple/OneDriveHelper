@@ -29,10 +29,8 @@ const (
 	OneDriveAutoRestarted = 3005
 	// OneDriveAutoRestartFailed: automatic restarts didn't work; the user was warned.
 	OneDriveAutoRestartFailed = 3006
-	// OneDriveStateUnknown: the process list could not be read 5 checks in a row.
-	OneDriveStateUnknown = 3007
-	OrphanedLibraries    = 4001
-	OrphansResolved      = 4002
+	OrphanedLibraries         = 4001
+	OrphansResolved           = 4002
 	// RemediationStarted is the approval step's event (an admin approved a fix).
 	RemediationStarted = 5001
 	// RemediationCompleted: every folder of a fix was removed after backing it up.
@@ -47,16 +45,10 @@ const (
 	FixInterrupted = 5007
 	// FixReregistered: OneDrive is syncing the original location again; the local copy was kept.
 	FixReregistered = 5008
-	// FixRefusedLink: a junction or link in the path; the folder was not touched.
-	FixRefusedLink = 5009
-	// ApprovalTimedOut: nobody answered the approval in time; nothing changed.
-	ApprovalTimedOut = 5010
 	// FixStarted: the file work of an approved fix started.
 	FixStarted = 5011
 	// FixKept: a folder was left in the staging area; the message names it.
 	FixKept = 5012
-	// FixRefusedData: OneDrive data unreadable, OneDrive starting up, or process state unknown.
-	FixRefusedData = 5013
 )
 
 // Log is a best-effort event log writer; a nil or failed log silently drops events.
