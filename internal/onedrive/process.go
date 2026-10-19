@@ -77,7 +77,8 @@ func OneDriveExe(h Hive) string {
 		}
 	}
 	for _, c := range candidates {
-		if c == "" {
+		// The registry value is user-writable; only ever start a file called OneDrive.exe.
+		if c == "" || !strings.EqualFold(filepath.Base(c), "OneDrive.exe") {
 			continue
 		}
 		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {

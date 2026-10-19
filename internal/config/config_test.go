@@ -48,7 +48,7 @@ func TestBackupDir(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	bad := Defaults()
-	bad.SupportEmail = "not an email"
+	bad.SupportEmail = "help@contoso.example?bcc=attacker@evil.example"
 	bad.SupportURL = "javascript:alert(1)"
 	bad.AccentColor = "blue"
 	bad.IgnoreOptions = "5m,forever"

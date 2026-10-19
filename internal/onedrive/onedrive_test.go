@@ -227,6 +227,21 @@ func TestFindOrphansPersonalAndKnownFolders(t *testing.T) {
 	}
 }
 
+func TestWebURLOnlyHTTPS(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://contoso.sharepoint.com/sites/x": "https://contoso.sharepoint.com/sites/x",
+		" HTTPS://contoso.sharepoint.com ":       "HTTPS://contoso.sharepoint.com",
+		`C:\Windows\System32\calc.exe`:           "",
+		"file:///C:/evil.exe":                    "",
+		"http://contoso.sharepoint.com":          "",
+		`https://x" & calc`:                      "",
+	} {
+		if got := webURL(in); got != want {
+			t.Errorf("webURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestStaleNavEntries(t *testing.T) {
 	entries := []NavEntry{
 		{CLSID: "{04271989-C4D2-1}", Name: "Gone", Target: `C:\Users\d\Gone`},

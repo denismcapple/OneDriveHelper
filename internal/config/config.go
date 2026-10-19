@@ -207,10 +207,10 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.SupportName) == "" {
 		errs = append(errs, errors.New("SupportName must not be empty"))
 	}
-	if e := c.SupportEmail; e != "" && (!strings.Contains(e, "@") || strings.ContainsAny(e, " \t<>\"")) {
+	if e := c.SupportEmail; e != "" && (!strings.Contains(e, "@") || strings.ContainsAny(e, " \t\r\n<>\"?&,;:/\\")) {
 		errs = append(errs, fmt.Errorf("SupportEmail %q is not a valid e-mail address", e))
 	}
-	if c.SupportURL != "" && !validLink(c.SupportURL) {
+	if c.SupportURL != "" && (!validLink(c.SupportURL) || strings.ContainsAny(c.SupportURL, " \t\r\n\"")) {
 		errs = append(errs, fmt.Errorf("SupportURL must start with https://, http:// or mailto: (got %q)", c.SupportURL))
 	}
 	switch strings.ToLower(c.SupportEmailMethod) {

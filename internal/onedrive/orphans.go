@@ -280,14 +280,14 @@ func FindOrphans(in Inputs, fs FS) []Orphan {
 			}
 			o := Orphan{Path: p, TenantRoot: root, Name: e.Name, Library: in.knownFor(c)}
 			if o.Library != nil {
-				o.WebURL = o.Library.WebURL
-				if o.Library.WebURL == "" || o.Library.UserEmail == "" {
+				o.WebURL = webURL(o.Library.WebURL)
+				if o.WebURL == "" || o.Library.UserEmail == "" {
 					o.Library = nil // not enough to build an odopen:// link
 				}
 			}
 			for _, pr := range in.Providers {
 				if o.WebURL == "" && Clean(pr.MountPoint) == c {
-					o.WebURL = pr.WebURL
+					o.WebURL = webURL(pr.WebURL)
 				}
 			}
 			out = append(out, o)
@@ -332,6 +332,17 @@ func (in Inputs) knownFor(c string) *Library {
 }
 
 const hiddenSystem = 0x2 | 0x4 // FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM
+
+// webURL accepts only https:// site addresses. These values come from the
+// user's registry and are later opened with the shell, so anything else
+// (file paths, other protocols) is dropped.
+func webURL(u string) string {
+	u = strings.TrimSpace(u)
+	if strings.HasPrefix(strings.ToLower(u), "https://") && !strings.ContainsAny(u, " \t\r\n\"") {
+		return u
+	}
+	return ""
+}
 
 func onlyDesktopIni(entries []fsutil.Entry) bool {
 	for _, e := range entries {

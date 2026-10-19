@@ -260,21 +260,29 @@ $Settings = @'
 '@
 
 $arch = if ($env:PROCESSOR_ARCHITEW6432 -eq 'ARM64' -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
-$work = Join-Path $env:TEMP "OneDriveHelper-$Version"
-$zip  = "$work.zip"
 $url  = "https://github.com/denismcapple/OneDriveHelper/releases/download/$Version/OneDriveHelper-$Version-$arch.zip"
 
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $Hashes[$arch]) { throw "Checksum mismatch for $url" }
+# Work in a randomly named folder that only SYSTEM and Administrators can touch.
+# (C:\Windows\Temp lets ordinary users create files, so a fixed, guessable path
+# there could be swapped out between the checksum check and running the installer.)
+$work = Join-Path $env:TEMP ("OneDriveHelper-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $work | Out-Null
+& icacls.exe $work /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+if ($LASTEXITCODE) { throw "Could not secure $work" }
+$zip = Join-Path $work 'package.zip'
+$pkg = Join-Path $work 'package'
 
-Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
-Expand-Archive $zip -DestinationPath $work
-$Settings | Set-Content (Join-Path $work 'settings.json') -Encoding UTF8
-
-& (Join-Path $work 'OneDriveHelper.exe') install --config (Join-Path $work 'settings.json')
-$code = $LASTEXITCODE
-Remove-Item $work, $zip -Recurse -Force -ErrorAction SilentlyContinue
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+    if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $Hashes[$arch]) { throw "Checksum mismatch for $url" }
+    Expand-Archive $zip -DestinationPath $pkg
+    $Settings | Set-Content (Join-Path $pkg 'settings.json') -Encoding UTF8
+    & (Join-Path $pkg 'OneDriveHelper.exe') install --config (Join-Path $pkg 'settings.json')
+    $code = $LASTEXITCODE
+} finally {
+    Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+}
 exit $code
 ```
 
@@ -285,9 +293,17 @@ If you'd rather not download from GitHub on every PC, host the zip on your own f
 There's no need to reinstall to change settings. Push a new settings file and import it:
 
 ```powershell
-$Settings | Set-Content "$env:TEMP\odh-settings.json" -Encoding UTF8
-& "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" config import "$env:TEMP\odh-settings.json"
-exit $LASTEXITCODE
+# $Settings holds the JSON, as in the install script above.
+# The file goes in a private, randomly named folder so nobody can swap it before it's imported.
+$work = Join-Path $env:TEMP ("OneDriveHelper-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $work | Out-Null
+& icacls.exe $work /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+$file = Join-Path $work 'settings.json'
+$Settings | Set-Content $file -Encoding UTF8
+& "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" config import $file
+$code = $LASTEXITCODE
+Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+exit $code
 ```
 
 Settings that aren't in the file stay as they are, so a file containing only `{ "SupportPhone": "+1 555 0199" }` changes just the phone number. To check a file before rolling it out, run `OneDriveHelper.exe config validate <file>`. To see what a PC is actually using, and where each value came from, run `OneDriveHelper.exe config show`.
@@ -412,6 +428,10 @@ We were careful about the things that tend to go wrong with tools like this:
 * The service's log folder is locked to administrators, so a user can't plant links to redirect its writes.
 * Files are copied and deleted as the user, not as an administrator, because everything happens inside their own profile. The UAC step is an approval gate to prevent mistakes. Running the file work elevated would let a user redirect admin writes with a junction.
 * The settings tool and installer reject invalid settings outright.
+* Values read from the user's own registry are treated as untrusted. Only `https://` site addresses are ever opened, and only a file called `OneDrive.exe` is ever started.
+* On shared Remote Desktop hosts, one user can't stop another user's alerts. Each session's "already running" marker lives in that session's own private namespace.
+
+There's more in [SECURITY.md](SECURITY.md), including how to report a problem.
 
 ## Known limitations
 

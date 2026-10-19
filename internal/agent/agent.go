@@ -26,10 +26,16 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
 
-// MutexName is held by the running agent of a session; the service uses it to
-// tell whether an agent is alive.
+// The running agent of a session holds a mutex in that session's own
+// namespace. Only processes in the session can create it there, so a user in
+// another session (e.g. on a shared Remote Desktop host) cannot squat the name
+// to stop this session's agent from starting.
+const agentMutex = `OneDriveHelperAgent`
+
+// MutexName is the name the service uses (from session 0) to look for the
+// agent mutex of a given session.
 func MutexName(session uint32) string {
-	return fmt.Sprintf(`Global\OneDriveHelperAgent-%d`, session)
+	return fmt.Sprintf(`Session\%d\%s`, session, agentMutex)
 }
 
 // LogPath returns the per-user agent log file.
@@ -108,7 +114,7 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 		}
 	}
 	session := winapi.CurrentSessionID()
-	name, _ := windows.UTF16PtrFromString(MutexName(session))
+	name, _ := windows.UTF16PtrFromString(`Local\` + agentMutex)
 	mu, err := windows.CreateMutex(nil, false, name)
 	if err != nil { // includes ERROR_ALREADY_EXISTS
 		if mu != 0 {
