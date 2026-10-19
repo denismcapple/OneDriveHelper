@@ -140,6 +140,7 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 
 	a.log.Printf("agent %s started in session %d (standalone=%v)", version.Version, session, standalone)
 	a.ev.Info(elog.AgentStarted, fmt.Sprintf("OneDrive Helper agent started for %s in session %d.", a.user, session))
+	a.recoverFixes()
 
 	serviceDown := 0
 	timer := time.NewTimer(5 * time.Second)
@@ -230,6 +231,19 @@ func (a *Agent) tryAutoRestart(cfg config.Config, now time.Time) bool {
 		a.log.Printf("OneDrive was not running; automatic restart %d/%d", attempt, cfg.AutoRestartAttempts)
 	}
 	return true
+}
+
+// recoverFixes finishes or reports fixes interrupted by a crash, kill, power
+// loss or logoff. It runs as the user only (never elevated).
+func (a *Agent) recoverFixes() {
+	t, err := remediate.CurrentUserTarget()
+	if err != nil {
+		a.log.Printf("recovery: %v", err)
+		return
+	}
+	for _, i := range remediate.Recover(t, a.log, a.ev) {
+		a.log.Printf("recovery: needs attention:\n%s", i.Text())
+	}
 }
 
 // waitForFix blocks while a fix is running so files are never left half-moved.

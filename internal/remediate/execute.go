@@ -298,6 +298,7 @@ func (r *run) folder(it Item, stageDir string, out *Outcome) {
 		r.restoreOrKeep(e, out, "nothing was removed because "+why)
 		return
 	}
+	defer v.close() // also on a panic, so no file stays locked
 	if err := r.j.set(e, StateDeleting, ""); err != nil {
 		v.close()
 		r.restoreOrKeep(e, out, "could not record the fix: "+err.Error())

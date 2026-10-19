@@ -89,9 +89,24 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		winapi.Error(cfg.Title(), err.Error())
 		return
 	}
+	// Finish or report any earlier fix that was interrupted before planning a new one.
+	func() {
+		ev := elog.Open()
+		defer ev.Close()
+		Recover(t, lg, ev)
+	}()
 	plan, err := BuildPlan(t, cfg)
 	if err != nil {
 		winapi.Error(cfg.Title(), err.Error()+"\n\n"+cfg.SupportContact())
+		return
+	}
+	if len(plan.Interrupted) > 0 {
+		var b strings.Builder
+		for _, i := range plan.Interrupted {
+			b.WriteString(i.Text())
+		}
+		winapi.Warn(cfg.Title(), "An earlier fix did not finish, and these folders are not where they were:\n\n"+b.String()+
+			"\nPlease contact support before fixing anything else. "+cfg.SupportContact())
 		return
 	}
 	if len(plan.Items) == 0 {

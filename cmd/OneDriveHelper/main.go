@@ -201,6 +201,20 @@ func check() error {
 			fmt.Printf("    re-sync IDs unknown\n")
 		}
 	}
+	if len(in.ReadErrors) > 0 {
+		fmt.Printf("\nOneDrive data that could not be read (no folder will be fixed until this is resolved):\n")
+		for _, e := range in.ReadErrors {
+			fmt.Printf("  %s\n", e)
+		}
+	}
+	if list := remediate.ListInterrupted(profile); len(list) > 0 {
+		fmt.Printf("\nUnfinished fixes: %d\n", len(list))
+		for _, i := range list {
+			for _, l := range strings.Split(strings.TrimSpace(i.Text()), "\n") {
+				fmt.Printf("  %s\n", l)
+			}
+		}
+	}
 	return nil
 }
 
@@ -216,7 +230,7 @@ func dryRun(sid string) error {
 	if err != nil {
 		return err
 	}
-	if len(plan.Items) == 0 && len(plan.Excluded) == 0 {
+	if len(plan.Items) == 0 && len(plan.Excluded) == 0 && len(plan.Interrupted) == 0 {
 		fmt.Println("No orphaned library folders found.")
 		return nil
 	}

@@ -88,11 +88,13 @@ type Plan struct {
 	LocalBytes int64
 	FreeBytes  uint64
 	Required   uint64
+	// Interrupted lists unfinished earlier fixes (shown, never acted on here).
+	Interrupted []Interrupted
 }
 
 // BuildPlan detects orphans for t and measures the locally stored data.
 func BuildPlan(t Target, cfg config.Config) (*Plan, error) {
-	p := &Plan{Target: t, BackupDir: cfg.BackupDir(t.ProfileDir)}
+	p := &Plan{Target: t, BackupDir: cfg.BackupDir(t.ProfileDir), Interrupted: ListInterrupted(t.ProfileDir)}
 	if !filepath.IsAbs(p.BackupDir) || len(p.BackupDir) <= 3 {
 		return p, fmt.Errorf("BackupRoot %q must resolve to an absolute folder (not a drive root)", cfg.BackupRoot)
 	}
@@ -145,6 +147,14 @@ func (p *Plan) Paths() string {
 	return strings.Join(s, "|")
 }
 
+func indent(s, prefix string) string {
+	var b strings.Builder
+	for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		b.WriteString(prefix + l + "\n")
+	}
+	return b.String()
+}
+
 func insideProfile(path, profile string) bool {
 	c, pr := onedrive.Clean(path), onedrive.Clean(profile)
 	return pr != "" && strings.HasPrefix(c, strings.TrimSuffix(pr, `\`)+`\`)
@@ -183,6 +193,12 @@ func (p *Plan) Summary() string {
 	}
 	for _, e := range p.Excluded {
 		fmt.Fprintf(&b, "• %s - skipped, fix manually\n", e)
+	}
+	if len(p.Interrupted) > 0 {
+		b.WriteString("\nAn earlier fix did not finish:\n")
+		for _, i := range p.Interrupted {
+			b.WriteString(indent(i.Text(), "    "))
+		}
 	}
 	fmt.Fprintf(&b, "\nFiles will be saved to: %s\\<date-time>\\<library>\nSpace needed: %s (incl. margin), available: %s\n",
 		p.BackupDir, HumanBytes(int64(p.Required)), HumanBytes(int64(p.FreeBytes)))

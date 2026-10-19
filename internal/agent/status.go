@@ -30,14 +30,27 @@ type Status struct {
 	Orphans      []onedrive.Orphan
 	StaleNav     []onedrive.NavEntry // Explorer side-panel entries pointing at missing folders
 	Session      uint32
+	// Interrupted lists earlier fixes that did not finish (folders not where they were).
+	Interrupted []remediate.Interrupted
 }
 
 // NotRunning reports a OneDrive outage worth telling the user about.
 func (s Status) NotRunning() bool { return s.Configured && !s.Running && !s.Updating }
 
+// unfinished counts interrupted fixes that are not still running.
+func (s Status) unfinished() int {
+	n := 0
+	for _, i := range s.Interrupted {
+		if !i.Running {
+			n++
+		}
+	}
+	return n
+}
+
 // Problems counts what needs attention.
 func (s Status) Problems() int {
-	n := len(s.Orphans)
+	n := len(s.Orphans) + s.unfinished()
 	if s.NotRunning() {
 		n++
 	}
@@ -46,7 +59,7 @@ func (s Status) Problems() int {
 
 func (s Status) severity() popup.Severity {
 	switch {
-	case len(s.Orphans) > 0:
+	case len(s.Orphans) > 0 || s.unfinished() > 0:
 		return popup.Critical
 	case s.NotRunning():
 		return popup.Warning
@@ -59,6 +72,9 @@ func (s Status) summary() string {
 	var parts []string
 	if s.NotRunning() {
 		parts = append(parts, "OneDrive is not running")
+	}
+	if s.unfinished() > 0 {
+		parts = append(parts, "an earlier fix did not finish")
 	}
 	switch n := len(s.Orphans); {
 	case n == 1:
@@ -90,6 +106,7 @@ func (a *Agent) collect(cfg config.Config) Status {
 		s.Orphans = onedrive.FindOrphans(in, onedrive.OSFS)
 		s.StaleNav = onedrive.StaleNavEntries(a.hive, in, nil)
 	}
+	s.Interrupted = remediate.ListInterrupted(a.profile)
 	a.mu.Lock()
 	s.MissingSince = a.missingSince
 	a.mu.Unlock()
@@ -124,6 +141,12 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 		items, footer = orphanItems(s.Orphans, remediate.ResyncNote)
 		if s.OrphanSnooze.Active {
 			footer = strings.TrimSpace(footer + "\n\nThe alert for these folders is ignored " + s.OrphanSnooze.Describe() + ".")
+		}
+	}
+
+	for _, i := range s.Interrupted {
+		if !i.Running {
+			b.WriteString("\n\nAn earlier fix did not finish. These folders are not where they were:\n" + strings.TrimSpace(i.Text()))
 		}
 	}
 
@@ -189,6 +212,12 @@ func Report(c config.Config, s Status, logPath string) string {
 		fmt.Fprintf(&b, "  - %s\r\n    path:    %s\r\n    re-sync: %s\r\n", o.DisplayName(), o.Path, remediate.ResyncNote(o))
 		if o.WebURL != "" {
 			fmt.Fprintf(&b, "    site:    %s\r\n", o.WebURL)
+		}
+	}
+	if len(s.Interrupted) > 0 {
+		b.WriteString("\r\nUnfinished fixes:\r\n")
+		for _, i := range s.Interrupted {
+			b.WriteString(strings.ReplaceAll("  "+strings.TrimSpace(i.Text()), "\n", "\r\n  ") + "\r\n")
 		}
 	}
 	if len(s.StaleNav) > 0 {
