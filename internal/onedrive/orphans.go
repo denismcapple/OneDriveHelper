@@ -22,9 +22,6 @@ type Orphan struct {
 	// EmptyOrg marks a leftover organisation folder that contains no
 	// libraries at all (Path == TenantRoot). There is nothing to re-sync.
 	EmptyOrg bool
-	// Personal marks a personal "OneDrive - <Org>" folder whose account is no
-	// longer signed in on this PC (Path == TenantRoot).
-	Personal bool
 	// KnownFolders lists Windows folders (Desktop, Documents, ...) that are
 	// redirected into this folder. Such folders are never removed automatically.
 	KnownFolders []string
@@ -33,14 +30,10 @@ type Orphan struct {
 // Org is the organisation folder name, e.g. "Contoso".
 func (o Orphan) Org() string { return filepath.Base(o.TenantRoot) }
 
-// DisplayName is "Library (Org)", "Org (empty organisation folder)" or
-// "OneDrive - Org (personal OneDrive folder)".
+// DisplayName is "Library (Org)" or "Org (empty organisation folder)".
 func (o Orphan) DisplayName() string {
-	switch {
-	case o.EmptyOrg:
+	if o.EmptyOrg {
 		return o.Name + " (empty organisation folder)"
-	case o.Personal:
-		return o.Name + " (personal OneDrive folder)"
 	}
 	if o.TenantRoot == "" {
 		return o.Name
@@ -232,26 +225,10 @@ func FindOrphans(in Inputs, fs FS) []Orphan {
 		}
 	}
 	var out []Orphan
-	personal := map[string]bool{}
-	addPersonal := func(p string) {
-		c := Clean(p)
-		if c == "" || personal[c] || c == profile || isVolumeRoot(c) || overlaps(c, active) {
-			return
-		}
-		personal[c] = true
-		out = append(out, Orphan{Path: p, TenantRoot: p, Name: filepath.Base(p), Personal: true})
-	}
-	// Personal OneDrive folders recorded by OneDrive that still exist.
-	for _, p := range in.Providers {
-		if t := strings.ToLower(p.LibraryType); p.MountPoint != "" && (t == "personal" || t == "mysite") {
-			if _, err := fs.ReadDir(p.MountPoint); err == nil {
-				addPersonal(p.MountPoint)
-			}
-		}
-	}
 	// Folders in the profile carrying OneDrive's desktop.ini: plain ones are
-	// organisation folders; "OneDrive..." placeholder ones are personal
-	// OneDrive folders (orphaned when no signed-in account uses them).
+	// organisation folders. "OneDrive..." ones are personal OneDrive folders,
+	// which are never reported (a fresh PC always has an unused, empty
+	// "OneDrive" folder) and never scanned as organisation folders.
 	if in.ProfileDir != "" {
 		entries, _ := fs.ReadDir(in.ProfileDir)
 		for _, e := range entries {
@@ -263,7 +240,7 @@ func FindOrphans(in Inputs, fs FS) []Orphan {
 			odIni := err == nil && strings.Contains(strings.ToLower(decodeText(b)), "onedrive.exe")
 			switch {
 			case strings.HasPrefix(strings.ToLower(e.Name), "onedrive") && (e.IsCloud() || odIni):
-				addPersonal(dir)
+				continue
 			case odIni && e.Attr&fsutil.AttrReparsePoint == 0:
 				addRoot(dir)
 			}

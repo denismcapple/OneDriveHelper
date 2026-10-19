@@ -26,7 +26,7 @@ func DemoOrphans() []onedrive.Orphan {
 			Library: &onedrive.Library{UserEmail: "jsmith@acmecorp.example", WebURL: "https://fabrikam.sharepoint.com/sites/projects"}},
 		{Name: "Finance - Documents", Path: `C:\Users\jsmith\AcmeCorp\Finance - Documents`, TenantRoot: `C:\Users\jsmith\AcmeCorp`,
 			WebURL: "https://acmecorp.sharepoint.com/sites/finance"},
-		{Name: "OneDrive - Contoso Ltd", Path: `C:\Users\jsmith\OneDrive - Contoso Ltd`, TenantRoot: `C:\Users\jsmith\OneDrive - Contoso Ltd`, Personal: true},
+		{Name: "Contoso Ltd", Path: `C:\Users\jsmith\Contoso Ltd`, TenantRoot: `C:\Users\jsmith\Contoso Ltd`, EmptyOrg: true},
 	}
 }
 

@@ -215,8 +215,6 @@ func (p *Plan) Summary() string {
 		switch {
 		case it.Orphan.EmptyOrg:
 			b.WriteString("    Empty leftover organisation folder; it will just be removed.\n")
-		case it.Orphan.Personal:
-			b.WriteString("    Old personal OneDrive folder that no signed-in account syncs any more; nothing to re-sync.\n")
 		case it.Orphan.CanResync():
 			b.WriteString("    Will be re-synced automatically afterwards.\n")
 		case it.Orphan.WebURL != "":

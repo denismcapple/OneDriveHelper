@@ -119,9 +119,15 @@ func orphanItems(orphans []onedrive.Orphan, note func(onedrive.Orphan) string) (
 }
 
 func orphanSpec(c config.Config, orphans []onedrive.Orphan, a Actions) popup.Spec {
-	title := "A SharePoint library has stopped syncing"
+	one, many := "A SharePoint library has", "SharePoint libraries have"
+	for _, o := range orphans {
+		if o.EmptyOrg {
+			one, many = "A OneDrive folder has", "OneDrive folders have"
+		}
+	}
+	title := one + " stopped syncing"
 	if len(orphans) > 1 {
-		title = fmt.Sprintf("%d SharePoint libraries have stopped syncing", len(orphans))
+		title = fmt.Sprintf("%d %s stopped syncing", len(orphans), many)
 	}
 	items, more := orphanItems(orphans, nil)
 	footer := c.SupportContact()

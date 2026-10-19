@@ -2,8 +2,10 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.8.0** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.8.1** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
+> **New in 0.8.1: no more false alarms on new PCs.** Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are no longer reported. A freshly set-up PC signed in to a work account always has an empty, unused `OneDrive` folder, which 0.7.0 and 0.8.0 wrongly flagged as "stopped syncing". The alert's heading now also says "OneDrive folder" rather than "SharePoint library" when the list includes a leftover organisation folder.
+>
 > **New in 0.8.0: a much safer fix.** The folder fix is the only part of the tool that deletes anything, so it now moves each folder out of the way before saving it, deletes only files it has proven it saved, puts everything back if anything is in doubt, and recovers by itself if it's interrupted. Upgrades wait for a fix in progress, and roll back if they fail. The details are in [How the fix works](#how-the-fix-works).
 
 <p align="center">
@@ -26,7 +28,8 @@ We got tired of finding out about these the hard way, so we wrote something that
 * **Finds folders that have stopped syncing.** It compares what's on disk with what OneDrive is actually syncing. It catches:
   * library folders OneDrive has dropped
   * leftover organisation folders
-  * old personal `OneDrive - Something` folders that no account uses any more
+
+  Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are never flagged.
 * **Explains it in plain English.** Every alert has a **What does this mean?** link written for people who don't know or care how OneDrive works.
 * **Makes it easy to get help.** **Contact support** offers to e-mail your service desk with a full diagnostic report already in the message, or to open your support website.
 * **Fixes broken folders safely**, after an administrator approves. It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again. If anything is in doubt, nothing is deleted and the folder goes back where it was.
@@ -70,7 +73,7 @@ Each alert can be ignored for a while (5 minutes, 30 minutes, until the next res
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.8.0 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.8.1 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -267,15 +270,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.8.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.8.1; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.8.0'
+$Version = 'v0.8.1'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = '695D3475401ED0315590085F935B412E24DBDDBC82AE22BEA85750BC93F3CA0B'
-    'arm64' = '6066A1800EF06D6A3939057889F08654C2EFE77E14993A6E31D344DC9F192B80'
+    'x64'   = '85E73B5A20635838973D2FD4A0856AC7C726D5B0918CBA615A58F1FB7BB9434A'
+    'arm64' = 'C986C87CD0293BA19BE80047760617DF2AFDA5DA2819E410B8492A9E1FE27B36'
 }
 $Settings = @'
 {
@@ -457,10 +460,9 @@ OneDrive keeps several records of what it syncs, and once a library is dropped t
 
 OneDrive's provider list is only used as history, because it keeps entries for libraries it stopped syncing long ago.
 
-The organisation folders OneDrive creates in the profile (they carry a OneDrive `desktop.ini`) are then checked. Anything inside one that isn't being synced is reported. So are:
+The organisation folders OneDrive creates in the profile (they carry a OneDrive `desktop.ini`) are then checked. Anything inside one that isn't being synced is reported. So is an organisation folder that's empty apart from `desktop.ini`.
 
-* an organisation folder that's empty apart from `desktop.ini`
-* an old `OneDrive - Something` folder that no signed-in account uses
+Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are never reported, even when no signed-in account uses them. Every PC signed in to a work account has an empty `OneDrive` placeholder, so flagging them would raise false alarms on almost every new machine.
 
 To reconnect a library automatically we need its site, web and list IDs. Those are recorded while the library is healthy. They can also be recovered from the `ClientPolicy` files OneDrive leaves behind, which means even libraries that broke before this tool was installed can usually be reconnected.
 

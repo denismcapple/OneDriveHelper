@@ -240,7 +240,7 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	manual := false
 	for _, it := range plan.Items {
 		list.WriteString("• " + it.Orphan.DisplayName() + "\n    " + ResyncNote(it.Orphan) + "\n")
-		manual = manual || (!it.Orphan.CanResync() && !it.Orphan.EmptyOrg && !it.Orphan.Personal)
+		manual = manual || (!it.Orphan.CanResync() && !it.Orphan.EmptyOrg)
 	}
 	step3 := "  3. Ask OneDrive to sync the libraries again\n"
 	if manual {
@@ -345,8 +345,6 @@ func ResyncNote(o onedrive.Orphan) string {
 		return "Contains your " + strings.Join(o.KnownFolders, "/") + " folder, so it can only be fixed by your support team."
 	case o.EmptyOrg:
 		return "Empty leftover folder - it will simply be removed."
-	case o.Personal:
-		return "Old copy of a personal OneDrive that is no longer being synced (for example after your organisation was renamed, or an account was removed). Anything saved here is not backed up."
 	case o.CanResync():
 		return "Will be synced again automatically."
 	case o.WebURL != "":
@@ -361,13 +359,9 @@ func Resync(orphans []onedrive.Orphan, lg *log.Logger) {
 	cfg := config.Load()
 	ev := elog.Open()
 	defer ev.Close()
-	var auto, manual, none, personal []string
+	var auto, manual, none []string
 	for _, o := range orphans {
 		if o.EmptyOrg || exists(o.Path) {
-			continue
-		}
-		if o.Personal {
-			personal = append(personal, o.Name)
 			continue
 		}
 		switch {
@@ -388,7 +382,7 @@ func Resync(orphans []onedrive.Orphan, lg *log.Logger) {
 			none = append(none, o.DisplayName())
 		}
 	}
-	if len(auto)+len(manual)+len(none)+len(personal) == 0 {
+	if len(auto)+len(manual)+len(none) == 0 {
 		return
 	}
 	ev.Info(elog.ResyncRequested, fmt.Sprintf("Re-sync requested. Automatic: %v; manual: %v; unknown: %v", auto, manual, none))
@@ -401,10 +395,6 @@ func Resync(orphans []onedrive.Orphan, lg *log.Logger) {
 	}
 	if len(none) > 0 {
 		b.WriteString("These libraries must be re-added manually. " + cfg.SupportContact() + "\n• " + strings.Join(none, "\n• ") + "\n\n")
-	}
-	if len(personal) > 0 {
-		b.WriteString("These old personal OneDrive folders were removed (your files were saved first). Files that were already in the cloud are still there:\n• " +
-			strings.Join(personal, "\n• ") + "\n")
 	}
 	winapi.Info(cfg.Title(), b.String())
 }

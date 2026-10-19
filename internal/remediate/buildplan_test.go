@@ -143,11 +143,12 @@ func TestPlanRefusesFolderThatIsAJunction(t *testing.T) {
 	profile := t.TempDir()
 	target := filepath.Join(t.TempDir(), "Important")
 	must(t, os.MkdirAll(target, 0o755))
-	must(t, os.WriteFile(filepath.Join(target, "keep.txt"), []byte("x"), 0o644))
-	link := filepath.Join(profile, "OneDrive - Old Ltd")
+	ini := filepath.Join(target, "desktop.ini")
+	must(t, os.WriteFile(ini, []byte("[.ShellClassInfo]\r\nIconResource=C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe,6"), 0o644))
+	link := filepath.Join(profile, "Old Ltd") // an empty organisation folder
 	junction(t, link, target)
 	withPlanEnv(t, onedrive.Inputs{ProfileDir: profile,
-		Providers: []onedrive.Provider{{MountPoint: link, LibraryType: "personal"}}}, onedrive.StateNotRunning)
+		Providers: []onedrive.Provider{{MountPoint: filepath.Join(link, "Gone - Documents"), LibraryType: "teamsite"}}}, onedrive.StateNotRunning)
 	p, err := plan(t, profile)
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +156,7 @@ func TestPlanRefusesFolderThatIsAJunction(t *testing.T) {
 	if len(p.Items) != 0 || len(p.LinkRefused) != 1 {
 		t.Fatalf("a folder that is itself a junction must be refused: items %+v refused %v", p.Items, p.LinkRefused)
 	}
-	if _, err := os.Stat(filepath.Join(target, "keep.txt")); err != nil {
+	if _, err := os.Stat(ini); err != nil {
 		t.Error("the junction's target must be untouched")
 	}
 }

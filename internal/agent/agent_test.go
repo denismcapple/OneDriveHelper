@@ -88,6 +88,9 @@ func TestOrphanSpec(t *testing.T) {
 	if len(s.Items) != maxListed || s.Items[0].Path != `C:\Users\d\Org\A` || s.Items[0].Title != "•  A (Org)" {
 		t.Errorf("items: %+v", s.Items)
 	}
+	if got := orphanSpec(cfg, []onedrive.Orphan{{Name: "Old", Path: `C:\Users\d\Old`, TenantRoot: `C:\Users\d\Old`, EmptyOrg: true}}, Actions{}).Title; got != "A OneDrive folder has stopped syncing" {
+		t.Errorf("a leftover organisation folder is not a SharePoint library: %q", got)
+	}
 	var labels []string
 	for _, b := range s.Buttons {
 		labels = append(labels, b.Label)

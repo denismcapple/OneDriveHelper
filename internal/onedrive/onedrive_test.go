@@ -204,26 +204,50 @@ func TestFindOrphansEmptyAndPlainOrgFolders(t *testing.T) {
 	}
 }
 
-func TestFindOrphansPersonalAndKnownFolders(t *testing.T) {
+// Personal OneDrive folders are never reported, nor scanned as organisation
+// folders: a fresh PC signed in to a work account always has an unused,
+// empty "OneDrive" placeholder next to "OneDrive - <Org>".
+func TestFindOrphansIgnoresPersonalFolders(t *testing.T) {
 	profile := `C:\Users\jsmith`
-	live, old := filepath.Join(profile, "OneDrive - Contoso"), filepath.Join(profile, "OneDrive - OLD COMPANY")
+	live, plain, old := filepath.Join(profile, "OneDrive - Contoso"), filepath.Join(profile, "OneDrive"), filepath.Join(profile, "OneDrive - OLD COMPANY")
 	odIni := "[.ShellClassInfo]\r\nIconResource=C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe,5"
 	fs := fakeFS{
 		dirs: map[string][]fsutil.Entry{
-			Clean(profile): {cloud("OneDrive - Contoso"), cloud("OneDrive - OLD COMPANY"), dir("OneDrive notes")},
+			Clean(profile): {cloud("OneDrive - Contoso"), dir("OneDrive"), cloud("OneDrive - OLD COMPANY"), dir("OneDrive notes")},
+			Clean(plain):   {{Name: "desktop.ini", Attr: 0x6}},
 			Clean(old):     {dir("Documents")},
 		},
-		files: map[string]string{Clean(filepath.Join(old, "desktop.ini")): odIni},
+		files: map[string]string{
+			Clean(filepath.Join(plain, "desktop.ini")): odIni,
+			Clean(filepath.Join(old, "desktop.ini")):   odIni,
+		},
 	}
-	in := Inputs{ProfileDir: profile, Accounts: []Account{{Key: "Business1", UserFolder: live, SyncedFolders: []string{live}}}}
+	in := Inputs{
+		ProfileDir: profile,
+		Accounts:   []Account{{Key: "Business1", UserFolder: live, SyncedFolders: []string{live}}},
+		Providers:  []Provider{{MountPoint: old, LibraryType: "mysite"}, {MountPoint: plain, LibraryType: "personal"}},
+	}
+	if got := FindOrphans(in, fs); len(got) != 0 {
+		t.Fatalf("personal OneDrive folders must not be flagged: %+v", got)
+	}
+}
+
+func TestFindOrphansKnownFolders(t *testing.T) {
+	profile := `C:\Users\jsmith`
+	org := filepath.Join(profile, "Fabrikam")
+	lib := filepath.Join(org, "Bids - Documents")
+	fs := fakeFS{
+		dirs: map[string][]fsutil.Entry{
+			Clean(profile): {dir("Fabrikam")},
+			Clean(org):     {cloud("Bids - Documents")},
+		},
+	}
+	in := Inputs{ProfileDir: profile, Providers: []Provider{{MountPoint: lib, LibraryType: "teamsite"}}}
 	got := FindOrphans(in, fs)
-	if len(got) != 1 || got[0].Path != old || !got[0].Personal || got[0].DisplayName() != "OneDrive - OLD COMPANY (personal OneDrive folder)" {
-		t.Fatalf("expected only the old personal folder (not the live one or a plain 'OneDrive notes' folder): %+v", got)
+	if len(got) != 1 || got[0].Path != lib || len(got[0].KnownFolders) != 0 {
+		t.Fatalf("expected only the library, with no known folders: %+v", got)
 	}
-	if len(got[0].KnownFolders) != 0 {
-		t.Errorf("no known folders expected: %v", got[0].KnownFolders)
-	}
-	in.ShellFolders = map[string]string{"Personal": filepath.Join(old, "Documents"), "Desktop": filepath.Join(live, "Desktop")}
+	in.ShellFolders = map[string]string{"Personal": filepath.Join(lib, "Documents"), "Desktop": filepath.Join(profile, "Desktop")}
 	got = FindOrphans(in, fs)
 	if len(got) != 1 || strings.Join(got[0].KnownFolders, ",") != "Documents" {
 		t.Errorf("Documents redirected into the orphan must be reported: %+v", got)

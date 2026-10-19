@@ -257,8 +257,7 @@ func Report(c config.Config, s Status, logPath string) string {
 // sample data (used for visual checks).
 func PreviewStatus(ui *popup.Manager, c config.Config) {
 	s := Status{At: time.Now(), Configured: true, Running: true, Orphans: []onedrive.Orphan{
-		{Name: "OneDrive - Contoso Ltd", Path: `C:\Users\jsmith\OneDrive - Contoso Ltd`,
-			TenantRoot: `C:\Users\jsmith\OneDrive - Contoso Ltd`, Personal: true},
+		{Name: "Contoso Ltd", Path: `C:\Users\jsmith\Contoso Ltd`, TenantRoot: `C:\Users\jsmith\Contoso Ltd`, EmptyOrg: true},
 		{Name: "Bids Team - Documents", Path: `C:\Users\jsmith\Fabrikam\Bids Team - Documents`, TenantRoot: `C:\Users\jsmith\Fabrikam`},
 	}}
 	nop := Actions{Relaunch: func() {}, Snooze: func(string, string) {}, Support: func() {}, Email: func() {}, Website: func() {},

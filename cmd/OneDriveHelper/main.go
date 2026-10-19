@@ -191,8 +191,6 @@ func check() error {
 			fmt.Printf("    contains the user's %s folder - will not be fixed automatically\n", strings.Join(o.KnownFolders, "/"))
 		case o.EmptyOrg:
 			fmt.Printf("    empty leftover organisation folder (nothing to re-sync)\n")
-		case o.Personal:
-			fmt.Printf("    old personal OneDrive folder that no signed-in account syncs\n")
 		case o.CanResync():
 			fmt.Printf("    re-sync: %s\n", o.Library.ResyncURL())
 		case o.WebURL != "":
