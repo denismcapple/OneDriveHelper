@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 )
@@ -257,6 +258,16 @@ func TestExecuteSkipsFolderWithOpenFile(t *testing.T) {
 	}
 	if exists(res.StagingDir) {
 		t.Error("a run that only skipped leaves no staging folder")
+	}
+	if res.RunDir != "" || len(readAll(t, f.backup)) != 0 {
+		t.Errorf("nothing was saved, so no backup folder may be left or mentioned: %q", res.RunDir)
+	}
+	if res.Changed() {
+		t.Error("a run that only skipped changed nothing")
+	}
+	msg := resultMessage(res, config.Defaults())
+	if !strings.HasPrefix(msg, "Nothing was changed") || strings.Contains(msg, "saved files are in") {
+		t.Errorf("message: %q", msg)
 	}
 }
 
