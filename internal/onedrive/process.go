@@ -38,19 +38,45 @@ func Processes() ([]Proc, error) {
 	return out, err
 }
 
-// IsRunningInSession reports whether a process named exe runs in the session.
-func IsRunningInSession(exe string, session uint32) bool {
-	procs, _ := Processes()
-	for _, p := range procs {
-		if p.Session == session && strings.EqualFold(p.Name, exe) {
-			return true
-		}
+// ProcState is whether a process is running. A failed process listing is
+// Unknown, never "not running".
+type ProcState int
+
+const (
+	StateUnknown ProcState = iota
+	StateRunning
+	StateNotRunning
+)
+
+func (s ProcState) String() string {
+	switch s {
+	case StateRunning:
+		return "running"
+	case StateNotRunning:
+		return "not running"
 	}
-	return false
+	return "unknown"
 }
 
-// OneDriveRunning reports whether OneDrive.exe is running in the session.
-func OneDriveRunning(session uint32) bool { return IsRunningInSession("OneDrive.exe", session) }
+// RunningInSession reports whether a process named exe runs in the session.
+func RunningInSession(exe string, session uint32) (ProcState, error) {
+	procs, err := Processes()
+	if err != nil {
+		return StateUnknown, err
+	}
+	for _, p := range procs {
+		if p.Session == session && strings.EqualFold(p.Name, exe) {
+			return StateRunning, nil
+		}
+	}
+	return StateNotRunning, nil
+}
+
+// OneDriveState reports whether OneDrive.exe is running in the session.
+func OneDriveState(session uint32) ProcState {
+	s, _ := RunningInSession("OneDrive.exe", session)
+	return s
+}
 
 // UpdateInProgress reports whether a OneDrive installer/updater is running.
 func UpdateInProgress() bool {

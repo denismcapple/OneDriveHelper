@@ -29,8 +29,10 @@ const (
 	OneDriveAutoRestarted = 3005
 	// OneDriveAutoRestartFailed: automatic restarts didn't work; the user was warned.
 	OneDriveAutoRestartFailed = 3006
-	OrphanedLibraries         = 4001
-	OrphansResolved           = 4002
+	// OneDriveStateUnknown: the process list could not be read 5 checks in a row.
+	OneDriveStateUnknown = 3007
+	OrphanedLibraries    = 4001
+	OrphansResolved      = 4002
 	// RemediationStarted is the approval step's event (an admin approved a fix).
 	RemediationStarted = 5001
 	// RemediationCompleted: every folder of a fix was removed after backing it up.

@@ -45,16 +45,21 @@ type Agent struct {
 	// stopping reports that the service has asked agents to exit (or is down):
 	// no fix may start, and a running fix moves no further folders.
 	stopping func() bool
+	// procState and onEvent are replaced in tests.
+	procState func() onedrive.ProcState
+	onEvent   func(id uint32)
 
-	mu           sync.Mutex // guards the fields below (buttons run on other goroutines)
-	missingSince time.Time
-	outageLogged bool
-	restarts     []time.Time // automatic restart attempts (kept for autoRestartWindow)
-	autoGaveUp   bool        // automatic restarts exhausted for the current outage
-	orphanKey    string
-	fixing       bool
-	last         Status // latest check, for the tray menu and explanations
-	staleSince   map[string]time.Time
+	mu            sync.Mutex // guards the fields below (buttons run on other goroutines)
+	missingSince  time.Time
+	outageLogged  bool
+	restarts      []time.Time // automatic restart attempts (kept for autoRestartWindow)
+	autoGaveUp    bool        // automatic restarts exhausted for the current outage
+	lastRunning   time.Time   // last time OneDrive was seen running
+	unknownStreak int         // failed process listings in a row
+	orphanKey     string
+	fixing        bool
+	last          Status // latest check, for the tray menu and explanations
+	staleSince    map[string]time.Time
 }
 
 // staleNavGrace is how long an Explorer entry must point at a missing folder
@@ -233,6 +238,13 @@ func (a *Agent) tryAutoRestart(cfg config.Config, now time.Time) bool {
 	return true
 }
 
+func (a *Agent) warnEvent(id uint32, msg string) {
+	a.ev.Warning(id, msg)
+	if a.onEvent != nil {
+		a.onEvent(id)
+	}
+}
+
 // recoverFixes finishes or reports fixes interrupted by a crash, kill, power
 // loss or logoff. It runs as the user only (never elevated).
 func (a *Agent) recoverFixes() {
@@ -314,10 +326,33 @@ func (a *Agent) tick(cfg config.Config, now time.Time) {
 	a.updateTray(cfg, s)
 }
 
+// unknownLimit failed process listings in a row are logged once (3007).
+const unknownLimit = 5
+
+// oneDriveState reads OneDrive's process state (replaceable in tests).
+func (a *Agent) oneDriveState() onedrive.ProcState {
+	if a.procState != nil {
+		return a.procState()
+	}
+	return onedrive.OneDriveState(a.session)
+}
+
 func (a *Agent) checkOneDrive(cfg config.Config, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if onedrive.OneDriveRunning(a.session) {
+	state := a.oneDriveState()
+	if state == onedrive.StateUnknown {
+		// Can't tell: change nothing (no restart, no alert, no clock change).
+		if a.unknownStreak++; a.unknownStreak == unknownLimit {
+			a.log.Printf("the process list could not be read %d times in a row", unknownLimit)
+			a.warnEvent(elog.OneDriveStateUnknown, fmt.Sprintf("OneDrive Helper could not read the process list for %s %d checks in a row, so it cannot tell whether OneDrive is running.", a.user, unknownLimit))
+		}
+		return
+	}
+	afterUnknown := a.unknownStreak > 0
+	a.unknownStreak = 0
+	if state == onedrive.StateRunning {
+		a.lastRunning = now
 		if a.outageLogged {
 			if n := len(recentRestarts(a.restarts, now)); n > 0 && !a.autoGaveUp {
 				a.ev.Info(elog.OneDriveAutoRestarted, fmt.Sprintf("OneDrive had stopped for %s and was restarted automatically (attempt %d).", a.user, n))
@@ -336,8 +371,14 @@ func (a *Agent) checkOneDrive(cfg config.Config, now time.Time) {
 		return
 	}
 	if a.missingSince.IsZero() {
-		a.missingSince = now
-		return
+		if afterUnknown && !a.lastRunning.IsZero() {
+			// It stopped at some point while we couldn't look: count from the
+			// last time it was seen running, as the normal timeline would.
+			a.missingSince = a.lastRunning
+		} else {
+			a.missingSince = now
+			return
+		}
 	}
 	if now.Sub(a.missingSince) < cfg.OneDriveGrace() {
 		return
@@ -404,8 +445,8 @@ func (a *Agent) checkOrphans(cfg config.Config, now time.Time, orphans []onedriv
 // --- button actions (run on their own goroutines) ---
 
 func (a *Agent) relaunch() {
-	if onedrive.OneDriveRunning(a.session) {
-		return
+	if a.oneDriveState() != onedrive.StateNotRunning {
+		return // running, or we can't tell: never start a second copy
 	}
 	if err := onedrive.LaunchOneDrive(a.hive); err != nil {
 		a.log.Printf("relaunch: %v", err)
