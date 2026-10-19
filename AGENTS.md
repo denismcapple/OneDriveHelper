@@ -4,12 +4,14 @@
 Go (1.27+) Windows-only tool: `cmd/OneDriveHelper` (LocalSystem service + admin CLI, console subsystem), `cmd/OneDriveHelperAgent` (per-user agent + popups + UAC approval step) and `cmd/OneDriveHelperConfig` (settings window + --import/--export/--validate). The agent and config tool **must be built with `-H=windowsgui`**. Only dependency: `golang.org/x/sys`.
 
 ## Commands
-Go may not be on PATH in bash: use `"/c/Program Files/Go/bin/go.exe"`, or in PowerShell `$env:Path = "C:\Program Files\Go\bin;$env:Path"`.
+Go 1.27+ on PATH (for example `C:\Program Files\Go\bin`; in PowerShell `$env:Path = "C:\Program Files\Go\bin;$env:Path"`). `go.mod` pins the toolchain, which Go downloads if needed.
 
 - Format: `gofmt -w .`
 - Vet: `go vet ./...`
 - Test: `go test ./...`
 - Full build (vet + test + amd64/arm64 into `dist\`): `.\build.ps1 -Version x.y.z` (PowerShell)
+- Release (build + `release\OneDriveHelper-vX.Y.Z-x64.zip`, `-arm64.zip`, `SHA256SUMS.txt`): `.\release.ps1 -Version x.y.z`
+- CI: `.github/workflows/test.yml` (gofmt, vet, test, arm64 build) on every push and pull request.
 - Safe live checks on a dev box (no admin, no changes): `dist\amd64\OneDriveHelper.exe check`, `... remediate --dry-run`, `dist\amd64\OneDriveHelperAgent.exe test-popup`, `OneDriveHelperAgent.exe agent --standalone`
 
 ## Conventions / gotchas

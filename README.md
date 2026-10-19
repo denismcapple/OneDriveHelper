@@ -402,7 +402,7 @@ cd OneDriveHelper
 .\build.ps1 -Version 1.0.0
 ```
 
-That runs the checks and tests, then builds both architectures into `dist\amd64` and `dist\arm64`. If you'd rather do it by hand:
+That runs the checks and tests, then builds both architectures into `dist\amd64` and `dist\arm64`. To make release zips like the ones on the Releases page, run `.\release.ps1 -Version 1.0.0` instead: it builds, then writes `release\OneDriveHelper-v1.0.0-x64.zip`, `-arm64.zip` and `SHA256SUMS.txt`, with the names the RMM install script expects. If you'd rather do it by hand:
 
 ```powershell
 go build -o OneDriveHelper.exe ./cmd/OneDriveHelper
