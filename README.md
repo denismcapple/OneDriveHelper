@@ -239,15 +239,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.6.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.6.1; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.6.0'
+$Version = 'v0.6.1'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = '7A6BA84F7ADC709DCCCD398A42FFBC631B6BEB928D241A86116B458E24696826'
-    'arm64' = '91FD2EE72922428CF861B9E362A77F0333730E3A8A6629749A8632F9C73B72B8'
+    'x64'   = '4A4D84C1199CE10ABB5BD1B31153CC798ACDDF862A09BEE8CFA2564431EB8A44'
+    'arm64' = 'A6FBE9458297EF2C19B3632FA9B979C718805690F57D9B8A266A43D7DFED0FBF'
 }
 $Settings = @'
 {
