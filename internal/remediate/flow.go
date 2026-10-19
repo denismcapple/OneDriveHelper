@@ -282,9 +282,9 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	}
 	lg.Printf("result:\n%s", res.Text())
 	if res.OK() {
-		flow.info(cfg.Title(), "Folders fixed:\n\n"+res.Text()+"\nYour saved files are in:\n"+res.RunDir)
+		flow.info(cfg.Title(), resultMessage(res, cfg))
 	} else {
-		flow.warn(cfg.Title(), "The fix was only partly completed:\n\n"+res.Text()+"\nYour saved files are in:\n"+res.RunDir+"\n\n"+cfg.SupportContact())
+		flow.warn(cfg.Title(), resultMessage(res, cfg))
 	}
 	// Re-sync only folders that were fully fixed: rebuilding a library over a
 	// folder that was put back or kept in staging would mix them up.
@@ -296,6 +296,18 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		}
 	}
 	flow.resync(orphans, lg)
+}
+
+// resultMessage is what the user is told after a fix. It only mentions the
+// backup folder when something was actually saved there.
+func resultMessage(res *Result, cfg config.Config) string {
+	switch {
+	case res.OK():
+		return "Folders fixed:\n\n" + res.Text() + "\nYour saved files are in:\n" + res.RunDir
+	case !res.Changed():
+		return "Nothing was changed:\n\n" + res.Text() + "\nYour folders are exactly where they were. " + cfg.SupportContact()
+	}
+	return "The fix was only partly completed:\n\n" + res.Text() + "\nA copy of the files that were saved is in:\n" + res.RunDir + "\n\n" + cfg.SupportContact()
 }
 
 const notStarted = "OneDrive Helper is being updated or stopped, so the fix was not started. No changes were made. Please try again in a few minutes."

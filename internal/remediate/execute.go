@@ -60,6 +60,42 @@ func (r *Result) OK() bool {
 	return len(r.Outcomes) > 0
 }
 
+// Changed reports whether any folder was moved (and so possibly backed up).
+// A run where every folder was skipped or left alone changed nothing.
+func (r *Result) Changed() bool {
+	for _, o := range r.Outcomes {
+		if o.State != "" && o.State != StateSkipped {
+			return true
+		}
+	}
+	return false
+}
+
+// programsUsing names the programs that have files in dir open (Restart
+// Manager), so a skipped folder can say what to close. Read-only.
+func programsUsing(dir string) []string {
+	var files []string
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if len(files) >= 2000 {
+			return filepath.SkipAll
+		}
+		if d.Type()&os.ModeSymlink != 0 || d.Type()&os.ModeIrregular != 0 {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			files = append(files, p)
+		}
+		return nil
+	})
+	return winapi.ProgramsUsing(files)
+}
+
 // Done returns the outcomes of folders that were fully fixed.
 func (r *Result) Done() map[string]bool {
 	m := map[string]bool{}
@@ -252,8 +288,12 @@ func (r *run) folder(it Item, stageDir string, out *Outcome) {
 		out.State = StateSkipped
 		var busy errBusy
 		if errors.As(err, &busy) {
-			out.Error = "skipped because files in it are open. Close any files and Explorer windows in that folder and try again"
-			r.warn(elog.FixSkippedOpen, fmt.Sprintf("Fix for %s: %s was skipped because it is open in another program (%v).", t.UserName, o.Path, err))
+			who := "a file in it is open in another program"
+			if progs := programsUsing(o.Path); len(progs) > 0 {
+				who = strings.Join(progs, ", ") + " has a file in it open"
+			}
+			out.Error = "skipped because " + who + ". Close it (and any Explorer windows in that folder) and try again"
+			r.warn(elog.FixSkippedOpen, fmt.Sprintf("Fix for %s: %s was skipped because %s (%v).", t.UserName, o.Path, who, err))
 		} else {
 			out.Error = "skipped: the folder could not be moved: " + err.Error()
 		}
@@ -363,7 +403,12 @@ func (r *run) finish() bool {
 	res.ExplorerEntriesRemoved = env.navCleanup(t, keep, r.lg)
 	res.Finished = time.Now()
 	_ = r.j.save()
-	if b, err := json.MarshalIndent(res, "", "  "); err == nil {
+	if !res.Changed() {
+		// Nothing was moved or saved: don't leave an empty backup folder behind
+		// (or point the user at it).
+		_ = os.RemoveAll(winapi.LongPath(res.RunDir))
+		res.RunDir = ""
+	} else if b, err := json.MarshalIndent(res, "", "  "); err == nil {
 		if err := env.copyFinal(filepath.Join(res.RunDir, journalName), b); err != nil {
 			r.lg.Printf("copy the fix record to %s: %v (the record in %s stays)", res.RunDir, err, res.StagingDir)
 		}
