@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/denismcapple/OneDriveHelper/internal/agent"
+	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 )
 
 // activeUserSessions returns the IDs of sessions with a logged-on user in the
@@ -29,7 +29,7 @@ func activeUserSessions() ([]uint32, error) {
 
 // agentRunning checks for the agent's per-session mutex.
 func agentRunning(session uint32) bool {
-	name, _ := windows.UTF16PtrFromString(agent.MutexName(session))
+	name, _ := windows.UTF16PtrFromString(ipc.AgentMutexForSession(session))
 	h, err := windows.OpenMutex(windows.SYNCHRONIZE, false, name)
 	if err != nil {
 		return false

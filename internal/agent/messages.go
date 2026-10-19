@@ -147,7 +147,8 @@ func fixingSpec(c config.Config) popup.Spec {
 	return popup.Spec{
 		ID: idFixing, Severity: popup.Info, Brand: c.Title(), Accent: c.AccentColor,
 		Title: "Fixing your library folders…",
-		Body:  "Saving a copy of your files and cleaning up. Please don't open or save files in those folders until this finishes.",
+		Body: "The folders have been moved to a safe place while a copy of your files is saved. " +
+			"Please save new work somewhere else until this finishes.",
 	}
 }
 

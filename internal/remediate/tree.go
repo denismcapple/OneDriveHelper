@@ -1,12 +1,9 @@
 package remediate
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -69,10 +66,12 @@ func (s *Stats) fail(format string, a ...any) {
 }
 
 // walker visits a tree without following links. If dst is non-empty, locally
-// stored files are copied there (the "copy" pass); otherwise it only counts.
+// stored files are copied there and every entry is recorded in rec (the
+// "copy" pass); otherwise it only counts.
 type walker struct {
 	stats      Stats
 	dst        string
+	rec        record
 	onlineOnly []string // relative paths of files that only exist in the cloud
 }
 
@@ -85,9 +84,19 @@ func (w *walker) dir(src, dst, rel string) {
 	defer windows.CloseHandle(h)
 	if ti.isLink() {
 		w.stats.LinksSkipped++
+		if w.rec != nil {
+			w.rec[rel] = &recEntry{Kind: kindLink}
+		}
 		return
 	}
 	w.stats.Dirs++
+	if w.rec != nil {
+		m, err := metaOf(h)
+		if err != nil {
+			w.stats.fail("read %s: %v", src, err)
+		}
+		w.rec[rel] = &recEntry{Kind: kindDir, Meta: m}
+	}
 	if w.dst != "" {
 		if err := os.MkdirAll(winapi.LongPath(dst), 0o755); err != nil {
 			w.stats.fail("create %s: %v", dst, err)
@@ -103,49 +112,35 @@ func (w *walker) dir(src, dst, rel string) {
 		switch {
 		case e.IsLink():
 			w.stats.LinksSkipped++
+			if w.rec != nil {
+				w.rec[r] = &recEntry{Kind: kindLink}
+			}
 		case e.IsDir():
 			w.dir(s, d, r)
 		case e.OnlineOnly():
 			w.stats.OnlineOnlyFiles++
 			w.onlineOnly = append(w.onlineOnly, r)
+			if w.rec != nil {
+				m, ti, err := metaNoFollow(s, false)
+				if err != nil || ti.isLink() {
+					w.stats.fail("read %s: %v", s, err)
+				}
+				w.rec[r] = &recEntry{Kind: kindOnline, Meta: m}
+			}
 		default:
 			w.stats.LocalFiles++
 			w.stats.LocalBytes += e.Size
 			if w.dst != "" {
-				if err := copyFile(s, d, e); err != nil {
+				m, err := copyFileRecorded(s, d)
+				if err != nil {
 					w.stats.fail("copy %s: %v", s, err)
+				}
+				if w.rec != nil {
+					w.rec[r] = &recEntry{Kind: kindFile, Meta: m, Verified: err == nil}
 				}
 			}
 		}
 	}
-}
-
-func copyFile(src, dst string, e fsutil.Entry) error {
-	h, ti, err := openNoFollow(src, false)
-	if err != nil {
-		return err
-	}
-	in := os.NewFile(uintptr(h), src)
-	defer in.Close()
-	if ti.isLink() {
-		return errors.New("is a link; skipped")
-	}
-	out, err := os.OpenFile(winapi.LongPath(dst), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	n, err := io.Copy(out, in)
-	if cerr := out.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	if n != e.Size {
-		return fmt.Errorf("copied %d of %d bytes", n, e.Size)
-	}
-	_ = os.Chtimes(winapi.LongPath(dst), time.Unix(0, e.LastAccess.Nanoseconds()), time.Unix(0, e.LastWrite.Nanoseconds()))
-	return nil
 }
 
 // Scan counts what is stored locally in dir.
@@ -153,40 +148,6 @@ func Scan(dir string) (Stats, []string) {
 	w := &walker{}
 	w.dir(dir, "", "")
 	return w.stats, w.onlineOnly
-}
-
-// CopyLocal copies every locally stored file from src into dst.
-func CopyLocal(src, dst string) (Stats, []string) {
-	w := &walker{dst: dst}
-	w.dir(src, dst, "")
-	return w.stats, w.onlineOnly
-}
-
-// DeleteTree removes dir and its contents. Links are removed, never followed.
-func DeleteTree(dir string) error {
-	h, ti, err := openNoFollow(dir, true)
-	if err != nil {
-		return err
-	}
-	var errs []error
-	if !ti.isLink() {
-		entries, err := fsutil.ReadDir(dir)
-		errs = append(errs, err)
-		for _, e := range entries {
-			p := filepath.Join(dir, e.Name)
-			switch {
-			case e.IsDir() && !e.IsLink():
-				errs = append(errs, DeleteTree(p))
-			case e.IsDir():
-				errs = append(errs, removeDir(p))
-			default:
-				errs = append(errs, removeFile(p))
-			}
-		}
-	}
-	windows.CloseHandle(h)
-	errs = append(errs, removeDir(dir))
-	return errors.Join(errs...)
 }
 
 func removeFile(p string) error {
@@ -205,14 +166,4 @@ func removeDir(p string) error {
 		return fmt.Errorf("remove folder %s: %w", p, err)
 	}
 	return nil
-}
-
-// moveDir renames src to dst on the same volume (used for leftovers).
-func moveDir(src, dst string) error {
-	if err := os.MkdirAll(winapi.LongPath(filepath.Dir(dst)), 0o755); err != nil {
-		return err
-	}
-	s, _ := windows.UTF16PtrFromString(winapi.LongPath(src))
-	d, _ := windows.UTF16PtrFromString(winapi.LongPath(dst))
-	return windows.MoveFileEx(s, d, 0)
 }

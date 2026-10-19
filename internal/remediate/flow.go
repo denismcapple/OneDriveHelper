@@ -10,6 +10,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
+	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
@@ -78,8 +79,10 @@ func RunApproval(sid string) int {
 }
 
 // UserFlow runs in the user's agent when they click "Fix". busy(true/false)
-// brackets the file work so the caller can show a progress popup.
-func UserFlow(agentExe string, lg *log.Logger, busy func(bool)) {
+// brackets the file work so the caller can show a progress popup. stop
+// reports that OneDrive Helper is stopping (e.g. for an upgrade): no fix
+// starts after that, and no further folder is moved.
+func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool) {
 	cfg := config.Load()
 	t, err := CurrentUserTarget()
 	if err != nil {
@@ -145,10 +148,25 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool)) {
 		winapi.Warn(cfg.Title(), "The folders changed while waiting for approval, so nothing was done. Please try again.")
 		return
 	}
+	if stop() {
+		winapi.Info(cfg.Title(), notStarted)
+		return
+	}
 	ev := elog.Open()
 	defer ev.Close()
+	// Tell installers a fix is running, so an upgrade waits for it. The lock
+	// covers the file work only (not the dialogs or the UAC wait).
+	if release, err := ipc.HoldFixLock(); err != nil {
+		lg.Printf("fix lock: %v (continuing without it)", err)
+	} else {
+		defer release()
+	}
+	if stop() {
+		winapi.Info(cfg.Title(), notStarted)
+		return
+	}
 	busy(true)
-	res, err := Execute(again, lg, ev)
+	res, err := Execute(again, lg, ev, stop)
 	busy(false)
 	if err != nil {
 		lg.Printf("execute: %v", err)
@@ -161,12 +179,19 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool)) {
 	} else {
 		winapi.Warn(cfg.Title(), "The fix was only partly completed:\n\n"+res.Text()+"\nYour saved files are in:\n"+res.RunDir+"\n\n"+cfg.SupportContact())
 	}
-	orphans := make([]onedrive.Orphan, len(again.Items))
-	for i, it := range again.Items {
-		orphans[i] = it.Orphan
+	// Re-sync only folders that were fully fixed: rebuilding a library over a
+	// folder that was put back or kept in staging would mix them up.
+	done := res.Done()
+	var orphans []onedrive.Orphan
+	for _, it := range again.Items {
+		if done[onedrive.Clean(it.Orphan.Path)] {
+			orphans = append(orphans, it.Orphan)
+		}
 	}
 	Resync(orphans, lg)
 }
+
+const notStarted = "OneDrive Helper is being updated or stopped, so the fix was not started. No changes were made. Please try again in a few minutes."
 
 // ResyncNote explains, in plain words, how a folder will be reconnected.
 func ResyncNote(o onedrive.Orphan) string {

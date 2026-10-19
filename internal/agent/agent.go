@@ -18,6 +18,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
+	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/popup"
@@ -25,18 +26,6 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/version"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
-
-// The running agent of a session holds a mutex in that session's own
-// namespace. Only processes in the session can create it there, so a user in
-// another session (e.g. on a shared Remote Desktop host) cannot squat the name
-// to stop this session's agent from starting.
-const agentMutex = `OneDriveHelperAgent`
-
-// MutexName is the name the service uses (from session 0) to look for the
-// agent mutex of a given session.
-func MutexName(session uint32) string {
-	return fmt.Sprintf(`Session\%d\%s`, session, agentMutex)
-}
 
 // LogPath returns the per-user agent log file.
 func LogPath() string {
@@ -53,6 +42,9 @@ type Agent struct {
 	appData string
 	user    string
 	launch  func() error // starts OneDrive (replaceable in tests)
+	// stopping reports that the service has asked agents to exit (or is down):
+	// no fix may start, and a running fix moves no further folders.
+	stopping func() bool
 
 	mu           sync.Mutex // guards the fields below (buttons run on other goroutines)
 	missingSince time.Time
@@ -117,7 +109,9 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 		}
 	}
 	session := winapi.CurrentSessionID()
-	name, _ := windows.UTF16PtrFromString(`Local\` + agentMutex)
+	// The session's agent mutex lives in the session's own namespace, so a
+	// user in another session cannot squat it (see internal/ipc).
+	name, _ := windows.UTF16PtrFromString(ipc.AgentMutexLocal())
 	mu, err := windows.CreateMutex(nil, false, name)
 	if err != nil { // includes ERROR_ALREADY_EXISTS
 		if mu != 0 {
@@ -137,6 +131,7 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 		appData: os.Getenv("LOCALAPPDATA"),
 		user:    os.Getenv("USERNAME"),
 	}
+	a.stopping = func() bool { return ctx.Err() != nil || (!standalone && !serviceRunning()) }
 	defer a.ev.Close()
 	if a.ui, err = popup.Start(); err != nil {
 		a.log.Printf("popup UI unavailable: %v", err)
@@ -495,13 +490,17 @@ func (a *Agent) fix() {
 		return
 	}
 	cfg := config.Load()
+	stopping := a.stopping
+	if stopping == nil {
+		stopping = func() bool { return false }
+	}
 	remediate.UserFlow(exe, a.log, func(busy bool) {
 		if busy {
 			a.ui.Show(fixingSpec(cfg))
 		} else {
 			a.ui.Hide(idFixing)
 		}
-	})
+	}, stopping)
 }
 
 // RunSample shows both alerts with logging-only actions until both are closed
