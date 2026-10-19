@@ -1,0 +1,57 @@
+name: Bug report
+description: Something isn't working as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Please don't paste anything you wouldn't want public.** Issues on this repository can be seen by anyone.
+        The "Copy details for support" report and the log files contain user names, e-mail addresses,
+        computer names and folder paths. Replace those with made-up values (for example `jsmith`,
+        `user@contoso.example`, `PC-01`, `C:\Users\jsmith\Contoso\Projects - Documents`) before posting.
+
+        Found a security problem? Please don't open an issue. Use **Report a vulnerability** on the Security tab instead.
+  - type: input
+    id: version
+    attributes:
+      label: OneDrive Helper version
+      description: Run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`
+      placeholder: "0.6.1"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2, x64"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we reproduce it?
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: details
+    attributes:
+      label: Diagnostic details (redacted)
+      description: Output of `OneDriveHelper.exe check`, relevant lines from the logs, or the "Copy details for support" report, with personal details replaced.
+      render: text
+  - type: checkboxes
+    id: redacted
+    attributes:
+      label: Before you submit
+      options:
+        - label: I have removed or replaced names, e-mail addresses, computer names and company/folder names in everything above.
+          required: true

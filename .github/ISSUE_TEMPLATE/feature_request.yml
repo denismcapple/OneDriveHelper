@@ -1,0 +1,17 @@
+name: Feature request
+description: An idea that would make OneDrive Helper more useful
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Tell us about the situation you run into. Please leave out customer names and anything identifying.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
