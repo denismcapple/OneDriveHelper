@@ -6,29 +6,101 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/windows"
 )
 
-const maxSize = 5 << 20
+// maxSize is the size at which the log rotates to <file>.1 (so a log never
+// takes more than about twice this). A var so tests can shrink it.
+var maxSize int64 = 5 << 20
 
-// Open returns a logger writing to path (rotated to path.1 when larger than 5 MB).
-// If the file cannot be opened the logger falls back to stderr.
+// Open returns a logger writing to path, rotated to path.1 whenever it grows
+// past 5 MB, also while the process keeps running for weeks. If the file
+// cannot be opened the logger falls back to stderr.
 func Open(path string, alsoStderr bool) *log.Logger {
 	var w io.Writer = os.Stderr
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-		if fi, err := os.Stat(path); err == nil && fi.Size() > maxSize {
-			_ = os.Rename(path, path+".1")
-		}
-		if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
-			w = f
+		if r, err := openRotating(path); err == nil {
+			w = r
 			if alsoStderr {
-				w = io.MultiWriter(f, os.Stderr)
+				w = io.MultiWriter(r, os.Stderr)
 			}
 		}
 	}
 	return log.New(w, "", log.LstdFlags)
+}
+
+// rotating is an io.Writer that counts bytes and rotates the file to .1 when
+// it passes maxSize. log.Logger serialises writes, but several loggers may
+// share one rotating writer, so it has its own lock.
+type rotating struct {
+	mu   sync.Mutex
+	path string
+	f    *os.File
+	size int64
+}
+
+func openRotating(path string) (*rotating, error) {
+	r := &rotating{path: path}
+	if fi, err := os.Stat(path); err == nil && fi.Size() > maxSize {
+		_ = os.Rename(path, path+".1")
+	}
+	if err := r.open(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *rotating) open() error {
+	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	r.f, r.size = f, fi.Size()
+	return nil
+}
+
+func (r *rotating) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.size+int64(len(p)) > maxSize && r.size > 0 {
+		r.rotate()
+	}
+	n, err := r.f.Write(p)
+	r.size += int64(n)
+	return n, err
+}
+
+// Close closes the current file.
+func (r *rotating) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.f.Close()
+}
+
+// rotate moves the current file to .1 and starts a new one. If another
+// process has the file open (e.g. a second session of the same user) the
+// rename fails; then it keeps writing to the current file and tries again
+// at the next write past the limit.
+func (r *rotating) rotate() {
+	r.f.Close()
+	if err := os.Rename(r.path, r.path+".1"); err != nil {
+		if err := r.open(); err != nil {
+			r.f, _ = os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		}
+		return
+	}
+	if err := r.open(); err != nil {
+		r.f, _ = os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		r.size = 0
+	}
 }
 
 // PrepareProgramDataDir makes sure %ProgramData%\OneDriveHelper is owned by
