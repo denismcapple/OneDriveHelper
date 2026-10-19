@@ -95,6 +95,7 @@ func RunApproval(sid string, deadline time.Time) int {
 		return ExitError
 	}
 	plan, err := BuildPlan(t, cfg)
+	planEvents(ev, t, plan, err)
 	if err != nil {
 		lg.Printf("plan: %v", err)
 		winapi.Error(cfg.Title(), err.Error())
@@ -130,6 +131,21 @@ func RunApproval(sid string, deadline time.Time) int {
 		ev.Info(elog.RemediationStarted, fmt.Sprintf("%s approved remediation for %s:\r\n%s", admin, t.UserName, plan.Summary()))
 	}
 	return code
+}
+
+// planEvents logs refusals found while planning: 5013 when OneDrive's data
+// can't be trusted, 5009 for folders behind a junction or link.
+func planEvents(ev *elog.Log, t Target, p *Plan, err error) {
+	var refused *RefusedError
+	if errors.As(err, &refused) {
+		ev.Warning(elog.FixRefusedData, fmt.Sprintf("No OneDrive Helper fix was planned for %s: %s.", t.UserName, refused.Reason))
+		env.onEvent(elog.FixRefusedData)
+	}
+	if p != nil && len(p.LinkRefused) > 0 {
+		ev.Warning(elog.FixRefusedLink, fmt.Sprintf("OneDrive Helper will not fix these folders for %s because a junction or symbolic link is in the path:\r\n%s",
+			t.UserName, strings.Join(p.LinkRefused, "\r\n")))
+		env.onEvent(elog.FixRefusedLink)
+	}
 }
 
 // flowEnv is the outside world of UserFlow (replaced in tests).
@@ -181,6 +197,16 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	// Finish or report any earlier fix that was interrupted before planning a new one.
 	flow.recover(t, lg)
 	plan, err := flow.plan(t, cfg)
+	func() {
+		ev := elog.Open()
+		defer ev.Close()
+		planEvents(ev, t, plan, err)
+	}()
+	var refused *RefusedError
+	if errors.As(err, &refused) {
+		flow.warn(cfg.Title(), err.Error()+"\n\n"+cfg.SupportContact())
+		return
+	}
 	if err != nil {
 		flow.fail(cfg.Title(), err.Error()+"\n\n"+cfg.SupportContact())
 		return

@@ -95,7 +95,9 @@ Some safety rules that are always applied:
 * It never touches a folder OneDrive is actually syncing; this is checked before the folder is moved and again right before anything is deleted. If OneDrive's settings can't be read, every folder counts as "syncing".
 * It only touches folders inside the user's own profile.
 * It never touches a folder that contains the user's redirected Desktop or Documents.
-* It never follows junctions or symbolic links, and never puts a folder back through one.
+* It never follows junctions or symbolic links, and never puts a folder back through one. A folder with a junction or link anywhere in its path below the user's profile is refused (event 5009, naming the link).
+* It won't plan a fix while OneDrive's settings can't be read, while OneDrive is running for the user but shows no account yet (starting up or signing in), or while it can't tell whether OneDrive is running (event 5013). The user is asked to sign in to OneDrive first, or to contact support. A user who simply has no OneDrive account, or has signed out of all of them, can still be fixed.
+* A folder that couldn't be fully read when the fix was planned is never removed, as the confirmation says.
 * A delete that fails part-way (antivirus or a preview holding a file) stops at once. What wasn't deleted stays in the `Fixing` folder and is never moved back half-empty.
 
 **Clearing an unfinished fix.** If the status window or event 5007 reports an unfinished fix, the folder is in `C:\Users\<user>\ODHelper\Fixing\<date and time>\` and its backup in `ODHelper\Saved\<date and time>\`. Check the backup, copy back anything the user needs, then delete that `Fixing\<date and time>` folder. The report clears once the folder is gone.
@@ -383,7 +385,9 @@ And for information, if you want the full picture:
 | 5006 | Warning | A folder was skipped because it is open in another program |
 | 5007 | Information | An interrupted fix was undone: the folder was put back |
 | 5008 | Warning | OneDrive started syncing a folder's location again during the fix; nothing was deleted and both copies were kept |
+| 5009 | Warning | A folder was refused because a junction or symbolic link is in its path (the link is named) |
 | 5010 | Information | Nobody answered the fix approval in time; nothing changed |
+| 5013 | Warning | No fix was planned: OneDrive's settings couldn't be read, OneDrive was starting up, or it couldn't tell whether OneDrive was running |
 | 3007 | Warning | The list of running programs couldn't be read 5 checks in a row, so OneDrive Helper can't tell whether OneDrive is running (no restart or alert happens while it can't tell) |
 
 A fix where folders were only skipped, kept or left alone logs those per-folder events, not 5003.

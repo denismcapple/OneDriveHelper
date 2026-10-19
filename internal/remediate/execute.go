@@ -232,9 +232,20 @@ func Execute(p *Plan, lg *log.Logger, ev *elog.Log, stop func() bool) (*Result, 
 // folder fixes one folder, recording each step in the journal first.
 func (r *run) folder(it Item, stageDir string, out *Outcome) {
 	t, o := r.p.Target, it.Orphan
+	// The confirmation dialog promised that a folder whose scan failed is not removed.
+	if n := len(it.Stats.Errors); n > 0 {
+		out.Error = fmt.Sprintf("%d item(s) could not be read; this folder will NOT be removed", n)
+		return
+	}
 	// Never touch a folder OneDrive has picked up again (or if we can't tell).
 	if env.active(t, o.Path) {
 		out.Error = "folder is being synced again (or OneDrive's data could not be read); left untouched"
+		return
+	}
+	// Check again for junctions/links anywhere below the profile, right before moving.
+	if err := noLinkBelow(t.ProfileDir, o.Path); err != nil {
+		out.Error = "refused: " + err.Error() + "; nothing was changed"
+		r.warn(elog.FixRefusedLink, fmt.Sprintf("Fix for %s: %s was not touched because %v.", t.UserName, o.Path, err))
 		return
 	}
 	e := &JournalEntry{Source: o.Path, Staged: filepath.Join(stageDir, it.SaveAs), Backup: out.SavedTo, TenantRoot: o.TenantRoot}

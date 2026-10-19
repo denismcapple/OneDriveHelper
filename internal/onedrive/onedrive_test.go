@@ -164,6 +164,9 @@ func TestFindOrphans(t *testing.T) {
 	}
 }
 
+// FindOrphans is a pure function: it still reports these folders even when
+// the inputs carry read errors or OneDrive is starting up. Refusing to act on
+// such data happens in remediate.BuildPlan (RefusedError, event 5013).
 func TestFindOrphansEmptyAndPlainOrgFolders(t *testing.T) {
 	profile := `C:\Users\jsmith`
 	ini := "[.ShellClassInfo]\r\nIconResource=C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe,6"
