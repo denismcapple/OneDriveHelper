@@ -90,22 +90,59 @@ type Plan struct {
 	Required   uint64
 	// Interrupted lists unfinished earlier fixes (shown, never acted on here).
 	Interrupted []Interrupted
+	// LinkRefused lists folders refused because a junction or symbolic link
+	// is in their path (callers log 5009).
+	LinkRefused []string
 }
 
-// BuildPlan detects orphans for t and measures the locally stored data.
+// RefusedError means no fix may be planned: OneDrive's data could not be
+// read, OneDrive is running for the user but shows no account yet (starting
+// up or signing in), or it can't be told whether OneDrive is running.
+type RefusedError struct{ Reason string }
+
+func (e *RefusedError) Error() string {
+	return "No fix can be planned right now: " + e.Reason + ". Sign in to OneDrive first, or contact support."
+}
+
+// planEnv is the outside world of BuildPlan (replaced in tests).
+var planEnv = struct {
+	gather    func(t Target) onedrive.Inputs
+	procState func(sid string) onedrive.ProcState
+}{
+	gather:    func(t Target) onedrive.Inputs { return onedrive.Gather(t.Hive, t.ProfileDir) },
+	procState: onedrive.OneDriveStateForUser,
+}
+
+// BuildPlan detects orphans for t and measures the locally stored data. It
+// refuses (RefusedError) when OneDrive's data can't be trusted.
 func BuildPlan(t Target, cfg config.Config) (*Plan, error) {
 	p := &Plan{Target: t, BackupDir: cfg.BackupDir(t.ProfileDir), Interrupted: ListInterrupted(t.ProfileDir)}
 	if !filepath.IsAbs(p.BackupDir) || len(p.BackupDir) <= 3 {
 		return p, fmt.Errorf("BackupRoot %q must resolve to an absolute folder (not a drive root)", cfg.BackupRoot)
 	}
+	in := planEnv.gather(t)
+	switch state := planEnv.procState(t.SID); {
+	case len(in.ReadErrors) > 0:
+		return p, &RefusedError{"some of OneDrive's settings could not be read (" + strings.Join(in.ReadErrors, "; ") + ")"}
+	case state == onedrive.StateUnknown:
+		return p, &RefusedError{"it can't be told whether OneDrive is running"}
+	case state == onedrive.StateRunning && !onedrive.AnyConfigured(in.Accounts):
+		return p, &RefusedError{"OneDrive is running but no account is set up yet (it may be starting or signing in)"}
+	}
 	used := map[string]bool{}
-	for _, o := range onedrive.FindOrphans(onedrive.Gather(t.Hive, t.ProfileDir), onedrive.OSFS) {
+	for _, o := range onedrive.FindOrphans(in, onedrive.OSFS) {
 		if !insideProfile(o.Path, t.ProfileDir) {
 			p.Excluded = append(p.Excluded, o.Path+" (outside the user profile)")
 			continue
 		}
 		if len(o.KnownFolders) > 0 { // removing it would break the user's Desktop/Documents
 			p.Excluded = append(p.Excluded, o.Path+" (contains the user's "+strings.Join(o.KnownFolders, "/")+" folder)")
+			continue
+		}
+		// Never act on a folder reached through a junction or symbolic link.
+		if err := noLinkBelow(t.ProfileDir, o.Path); err != nil {
+			p.Excluded = append(p.Excluded, o.Path+" ("+err.Error()+")")
+			p.LinkRefused = append(p.LinkRefused, o.Path+": "+err.Error())
 			continue
 		}
 		if within(p.BackupDir, o.Path) {

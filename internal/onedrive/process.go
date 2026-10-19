@@ -78,6 +78,45 @@ func OneDriveState(session uint32) ProcState {
 	return s
 }
 
+// OneDriveStateForUser reports whether OneDrive.exe runs for the user with
+// the given SID, in any session (so a dry run from session 0, or the elevated
+// approval step, sees the right user). A failed listing is Unknown. Processes
+// whose owner cannot be read are another user's (a standard user cannot open
+// other users' processes; their own always can be).
+func OneDriveStateForUser(sid string) ProcState {
+	procs, err := Processes()
+	if err != nil {
+		return StateUnknown
+	}
+	for _, p := range procs {
+		if !strings.EqualFold(p.Name, "OneDrive.exe") {
+			continue
+		}
+		if owner, err := processOwner(p.PID); err == nil && strings.EqualFold(owner, sid) {
+			return StateRunning
+		}
+	}
+	return StateNotRunning
+}
+
+func processOwner(pid uint32) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return "", err
+	}
+	defer tok.Close()
+	u, err := tok.GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return u.User.Sid.String(), nil
+}
+
 // UpdateInProgress reports whether a OneDrive installer/updater is running.
 func UpdateInProgress() bool {
 	procs, _ := Processes()
