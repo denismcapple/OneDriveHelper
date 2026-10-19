@@ -2,6 +2,10 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
+**Current version: 0.8.0** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+
+> **New in 0.8.0: a much safer fix.** The folder fix is the only part of the tool that deletes anything, so it now moves each folder out of the way before saving it, deletes only files it has proven it saved, puts everything back if anything is in doubt, and recovers by itself if it's interrupted. Upgrades wait for a fix in progress, and roll back if they fail. The details are in [How the fix works](#how-the-fix-works).
+
 <p align="center">
   <img src="docs/images/status-problems.png" width="716" alt="OneDrive Helper status window listing folders that have stopped syncing">
 </p>
@@ -25,7 +29,7 @@ We got tired of finding out about these the hard way, so we wrote something that
   * old personal `OneDrive - Something` folders that no account uses any more
 * **Explains it in plain English.** Every alert has a **What does this mean?** link written for people who don't know or care how OneDrive works.
 * **Makes it easy to get help.** **Contact support** offers to e-mail your service desk with a full diagnostic report already in the message, or to open your support website.
-* **Fixes broken folders safely**, after an administrator approves. It saves a copy of every file stored on the PC first, removes the broken folder, then asks OneDrive to sync the library again.
+* **Fixes broken folders safely**, after an administrator approves. It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again. If anything is in doubt, nothing is deleted and the folder goes back where it was.
 * **Puts a status icon in the system tray**, so when a user rings you, you can see straight away what's wrong, even if they closed the alert.
 * **Writes everything to the Windows event log**, so your RMM can raise a ticket or alert you.
 * **Can be branded per customer**: company name, support contact, colours and wording, all set from a settings file you push out with your RMM.
@@ -66,7 +70,7 @@ Each alert can be ignored for a while (5 minutes, 30 minutes, until the next res
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Click it to see the status window (the screenshot at the top of this page). Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.8.0 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -83,7 +87,7 @@ Fixing a broken folder means deleting it from the PC, so we were careful:
 
 1. **The user confirms.** They're told which folders will be fixed and whether each one can be reconnected automatically.
 2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it. If nobody answers within 15 minutes, the user is told nothing changed (event 5010); the approval window closes itself after 10 minutes, and a late approval does nothing.
-3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told to close it and try again; other folders carry on.
+3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told which program to close (for example "Microsoft Excel has a file in it open") and to try again; other folders carry on. If every folder was skipped, the user is told plainly that nothing was changed.
 4. **Files are saved.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts. Each copy is written to disk, its size checked, and the original is confirmed unchanged while it was being read.
 5. **Only proven copies are deleted.** Before deleting anything, every file is checked again: it must have been copied in this run and be unchanged since, and nothing may have it open for writing. If even one file doesn't pass (or anything new appeared), nothing is deleted and the folder is put back where it was. If OneDrive has started syncing the old location again in the meantime, both copies are kept. A `manifest.json` records every step, before it happens.
 6. **OneDrive is asked to sync the library again**, for folders that were fully fixed. Where the library details are known, that's automatic. Otherwise the library's web page opens so the user can click Sync. The leftover shortcuts in Explorer's side panel are cleaned up too.
@@ -263,15 +267,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.7.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.8.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.7.0'
+$Version = 'v0.8.0'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = '482753930345CC9A2F21010600E36A1A66B2F840887BA19D23AB79304D7F17B0'
-    'arm64' = 'FF7F5C0027D8C77406C5D69156E516909CC5D03B1430387033BA1E88F51B229B'
+    'x64'   = '695D3475401ED0315590085F935B412E24DBDDBC82AE22BEA85750BC93F3CA0B'
+    'arm64' = '6066A1800EF06D6A3939057889F08654C2EFE77E14993A6E31D344DC9F192B80'
 }
 $Settings = @'
 {
@@ -419,7 +423,7 @@ The screenshots on this page are generated with made-up data by `go run ./tools/
 These need no admin rights; run them as the user:
 
 ```powershell
-& "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" check                 # what it sees: accounts, synced folders, problems
+& "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" check                 # what it sees: accounts, synced folders, problems, unfinished fixes, unreadable OneDrive data
 & "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" remediate --dry-run   # exactly what a fix would do, changes nothing
 & "C:\Program Files\OneDriveHelper\OneDriveHelperAgent.exe" test-popup       # show the alerts
 ```
