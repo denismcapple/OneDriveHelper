@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"time"
 
 	"github.com/denismcapple/OneDriveHelper/internal/agent"
 	"github.com/denismcapple/OneDriveHelper/internal/config"
@@ -41,8 +42,10 @@ func run() int {
 	case "remediate-approve":
 		fs := flag.NewFlagSet("remediate-approve", flag.ContinueOnError)
 		sid := fs.String("sid", "", "user SID")
+		deadline := fs.String("deadline", "", "Unix time after which nothing may be approved")
+		start := time.Now()
 		_ = fs.Parse(os.Args[2:])
-		return remediate.RunApproval(*sid)
+		return remediate.RunApproval(*sid, remediate.ParseDeadline(*deadline, start))
 	case "test-popup":
 		if err := agent.RunSample(); err != nil {
 			winapi.Error(config.Load().Title(), err.Error())

@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,13 +36,8 @@ func Install(configFile string, logf func(string, ...any)) error {
 		return err
 	}
 	srcDir, dir := filepath.Dir(self), InstallDir()
-	if _, err := os.Stat(filepath.Join(srcDir, version.AgentExe)); err != nil {
-		return fmt.Errorf("%s must be next to %s", version.AgentExe, filepath.Base(self))
-	}
-	if configFile != "" { // validate before changing anything
-		if _, _, err := config.ReadFile(configFile); err != nil {
-			return fmt.Errorf("settings file %s: %w", configFile, err)
-		}
+	if err := preflight(srcDir, filepath.Base(self), configFile); err != nil {
+		return err
 	}
 
 	m, err := mgr.Connect()
@@ -65,20 +59,30 @@ func Install(configFile string, logf func(string, ...any)) error {
 	}
 	w.stopAgents(deadline, legacy)
 
+	// From here on, a failure puts the previous programs back and restarts the
+	// service, so an upgrade never leaves a PC without a working version.
+	// (Settings are validated above but not rolled back.)
+	rollback := func() error { return nil }
 	if !strings.EqualFold(filepath.Clean(srcDir), filepath.Clean(dir)) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		for _, f := range []string{version.ServiceExe, version.AgentExe, version.ConfigExe} {
-			if _, err := os.Stat(filepath.Join(srcDir, f)); err != nil && f == version.ConfigExe {
-				continue // the config tool is optional
-			}
-			if err := copyWithRetry(filepath.Join(srcDir, f), filepath.Join(dir, f)); err != nil {
-				return fmt.Errorf("copy %s: %w", f, err)
-			}
-			_ = os.Remove(filepath.Join(dir, f+".old")) // left by an earlier upgrade
+		rb, err := upgrade(srcDir, dir, []string{version.ServiceExe, version.AgentExe, version.ConfigExe}, realFileOps())
+		if err != nil {
+			restartOld(m, logf)
+			return fmt.Errorf("upgrade failed, previous version kept: %w", err)
 		}
+		rollback = rb
 		logf("Copied binaries to %s", dir)
+	}
+	fail := func(err error) error {
+		if rbErr := rollback(); rbErr != nil {
+			logf("Warning: rolling back the programs failed: %v", rbErr)
+		} else {
+			logf("Rolled back to the previous programs")
+		}
+		restartOld(m, logf)
+		return err
 	}
 	svcExe := filepath.Join(dir, version.ServiceExe)
 	// Always quote the image path (mgr.CreateService only quotes paths that
@@ -89,14 +93,14 @@ func Install(configFile string, logf func(string, ...any)) error {
 	if err != nil {
 		s, err = m.CreateService(version.ServiceName, svcExe, mgr.Config{StartType: mgr.StartAutomatic})
 		if err != nil {
-			return fmt.Errorf("create service: %w", err)
+			return fail(fmt.Errorf("create service: %w", err))
 		}
 		logf("Created service %s", version.ServiceName)
 	}
 	defer s.Close()
 	cur, err := s.Config()
 	if err != nil {
-		return fmt.Errorf("read service config: %w", err)
+		return fail(fmt.Errorf("read service config: %w", err))
 	}
 	cur.BinaryPathName = binPath
 	cur.DisplayName = version.ProductName
@@ -104,10 +108,10 @@ func Install(configFile string, logf func(string, ...any)) error {
 	cur.StartType, cur.DelayedAutoStart = mgr.StartAutomatic, true
 	cur.ServiceStartName = "LocalSystem"
 	if err := s.UpdateConfig(cur); err != nil {
-		return fmt.Errorf("configure service: %w", err)
+		return fail(fmt.Errorf("configure service: %w", err))
 	}
 	if got, err := s.Config(); err != nil || got.BinaryPathName != binPath {
-		return fmt.Errorf("service image path is %q, expected %q", got.BinaryPathName, binPath)
+		return fail(fmt.Errorf("service image path is %q, expected %q", got.BinaryPathName, binPath))
 	}
 	logf("Service image path: %s", binPath)
 	_ = s.SetRecoveryActions([]mgr.RecoveryAction{
@@ -124,7 +128,7 @@ func Install(configFile string, logf func(string, ...any)) error {
 	}
 	if configFile != "" {
 		if err := config.Import(configFile); err != nil {
-			return fmt.Errorf("apply settings file: %w", err)
+			return fail(fmt.Errorf("apply settings file: %w", err))
 		}
 		logf("Applied settings from %s", configFile)
 	}
@@ -132,14 +136,62 @@ func Install(configFile string, logf func(string, ...any)) error {
 		logf("Removed obsolete settings: %s", strings.Join(old, ", "))
 	}
 	if err := config.WriteDefaults(); err != nil {
-		return fmt.Errorf("write default config: %w", err)
+		return fail(fmt.Errorf("write default config: %w", err))
 	}
 	logf("Configuration: HKLM\\%s", config.KeyPath)
-	if err := s.Start(); err != nil {
-		return fmt.Errorf("start service: %w", err)
+	if err := startAndWait(s); err != nil {
+		return fail(fmt.Errorf("start service: %w", err))
 	}
 	logf("Service started")
 	return nil
+}
+
+// preflight checks everything that can be checked before anything is stopped.
+func preflight(srcDir, self, configFile string) error {
+	if _, err := os.Stat(filepath.Join(srcDir, version.AgentExe)); err != nil {
+		return fmt.Errorf("%s must be next to %s", version.AgentExe, self)
+	}
+	if configFile != "" { // validate before changing anything
+		if _, _, err := config.ReadFile(configFile); err != nil {
+			return fmt.Errorf("settings file %s: %w", configFile, err)
+		}
+	}
+	return nil
+}
+
+// startAndWait starts the service and waits until it is running (an image
+// that crashes at start-up counts as a failure, so the upgrade rolls back).
+func startAndWait(s *mgr.Service) error {
+	if err := s.Start(); err != nil {
+		return err
+	}
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		st, err := s.Query()
+		if err != nil {
+			return err
+		}
+		switch st.State {
+		case svc.Running:
+			return nil
+		case svc.Stopped:
+			return errors.New("the service stopped right after starting")
+		}
+	}
+	return errors.New("timed out waiting for the service to start")
+}
+
+// restartOld starts the (previous) service again after a failed upgrade.
+func restartOld(m *mgr.Mgr, logf func(string, ...any)) {
+	s, err := m.OpenService(version.ServiceName)
+	if err != nil {
+		return // fresh install: nothing to restart
+	}
+	defer s.Close()
+	if err := s.Start(); err != nil {
+		logf("Warning: could not restart the previous service: %v", err)
+	} else {
+		logf("Previous service restarted")
+	}
 }
 
 // QuotePath wraps an executable path in double quotes.
@@ -236,38 +288,4 @@ func deleteTree(root registry.Key, path string) error {
 		_ = deleteTree(root, path+`\`+s)
 	}
 	return registry.DeleteKey(root, path)
-}
-
-func copyWithRetry(src, dst string) error {
-	var err error
-	for i := 0; i < 20; i++ { // agents may hold the old exe open for a few seconds
-		if err = copyFile(src, dst); err == nil {
-			return nil
-		}
-		// A running image can be renamed even though it cannot be overwritten.
-		_ = os.Rename(dst, dst+".old")
-		time.Sleep(time.Second)
-	}
-	return err
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	tmp := dst + ".new"
-	out, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	if err := out.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dst)
 }

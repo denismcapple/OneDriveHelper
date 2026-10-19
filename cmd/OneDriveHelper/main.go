@@ -166,7 +166,7 @@ func check() error {
 	}
 	exe := onedrive.OneDriveExe(h)
 	fmt.Printf("\nOneDrive.exe: %s\nRunning in this session: %v\nUpdate in progress: %v\n",
-		exe, onedrive.OneDriveRunning(session), onedrive.UpdateInProgress())
+		exe, onedrive.OneDriveState(session), onedrive.UpdateInProgress())
 
 	libs := onedrive.ReadLibraries(os.Getenv("LOCALAPPDATA"), accts)
 	fmt.Printf("\nLibraries known to OneDrive (with re-sync IDs): %d\n", len(libs))

@@ -336,7 +336,7 @@ func (c *card) setHover(i int) {
 func (c *card) click(i int) {
 	if i == helpHit {
 		if f := c.spec.OnHelp; f != nil {
-			go f()
+			go safeRun(f)
 		}
 		return
 	}
@@ -359,7 +359,7 @@ func (c *card) click(i int) {
 				c.m.hide(id)
 			}
 			if a := b.Menu[cmd-1].Action; a != nil {
-				go a()
+				go safeRun(a)
 			}
 		}
 		return
@@ -369,6 +369,6 @@ func (c *card) click(i int) {
 		c.m.hide(id) // c is invalid after this
 	}
 	if b.Action != nil {
-		go b.Action()
+		go safeRun(b.Action)
 	}
 }

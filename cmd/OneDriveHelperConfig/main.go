@@ -5,7 +5,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/configui"
@@ -55,6 +57,15 @@ func run(args []string) (int, string) {
 	if opt == "h" || opt == "help" || opt == "?" {
 		return 0, fmt.Sprintf(usage, version.Version)
 	}
+	// The settings window passes "--deadline <unix>" with its elevated
+	// --import, so an approval that comes after the window gave up does nothing.
+	var deadline time.Time
+	if len(args) == 4 && opt == "import" && strings.EqualFold(strings.TrimLeft(args[2], "-/"), "deadline") {
+		if n, err := strconv.ParseInt(args[3], 10, 64); err == nil {
+			deadline = time.Unix(n, 0)
+		}
+		args = args[:2]
+	}
 	if len(args) != 2 {
 		return 2, fmt.Sprintf(usage, version.Version)
 	}
@@ -71,6 +82,9 @@ func run(args []string) (int, string) {
 		}
 		return 0, "Settings file is valid."
 	case "import":
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return 3, "The administrator approval came too late, so the settings were not saved."
+		}
 		if !winapi.IsElevated() {
 			return 1, "--import must be run from an elevated (Run as administrator) prompt."
 		}

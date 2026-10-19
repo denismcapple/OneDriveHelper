@@ -22,7 +22,8 @@ type Status struct {
 	At           time.Time
 	Accounts     []onedrive.Account
 	Configured   bool
-	Running      bool
+	Running      bool // last known state when Unknown is set
+	Unknown      bool // the process list could not be read
 	Updating     bool
 	MissingSince time.Time  // zero unless OneDrive has been seen missing
 	Snoozed      bool       // the "OneDrive not running" alert is ignored
@@ -35,7 +36,7 @@ type Status struct {
 }
 
 // NotRunning reports a OneDrive outage worth telling the user about.
-func (s Status) NotRunning() bool { return s.Configured && !s.Running && !s.Updating }
+func (s Status) NotRunning() bool { return s.Configured && !s.Running && !s.Updating && !s.Unknown }
 
 // unfinished counts interrupted fixes that are not still running.
 func (s Status) unfinished() int {
@@ -96,7 +97,7 @@ func (a *Agent) collect(cfg config.Config) Status {
 	accts := onedrive.Accounts(a.hive)
 	s := Status{
 		At: time.Now(), Accounts: accts, Configured: onedrive.AnyConfigured(accts),
-		Running: onedrive.OneDriveRunning(a.session), Updating: onedrive.UpdateInProgress(),
+		Updating:     onedrive.UpdateInProgress(),
 		Snoozed:      Snoozed(a.hive, idNotRunning, time.Now(), winapi.BootTime()),
 		OrphanSnooze: Snooze(a.hive, idOrphans, time.Now(), winapi.BootTime()),
 		Session:      a.session,
@@ -108,6 +109,12 @@ func (a *Agent) collect(cfg config.Config) Status {
 	}
 	s.Interrupted = remediate.ListInterrupted(a.profile)
 	a.mu.Lock()
+	switch a.oneDriveState() {
+	case onedrive.StateRunning:
+		s.Running = true
+	case onedrive.StateUnknown:
+		s.Unknown, s.Running = true, a.last.Running // show the last known state
+	}
 	s.MissingSince = a.missingSince
 	a.mu.Unlock()
 	return s
@@ -118,6 +125,13 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 	switch {
 	case !s.Configured:
 		b.WriteString("OneDrive:  not set up for this user.")
+	case s.Unknown:
+		b.WriteString("OneDrive:  can't tell right now (the list of running programs could not be read). Last known: ")
+		if s.Running {
+			b.WriteString("running.")
+		} else {
+			b.WriteString("not running.")
+		}
 	case s.Running:
 		b.WriteString("OneDrive:  running.")
 	case s.Updating:
@@ -192,8 +206,8 @@ func Report(c config.Config, s Status, logPath string) string {
 	fmt.Fprintf(&b, "Computer:   %s\r\nUser:       %s (session %d)\r\nVersion:    %s\r\nCompany:    %s\r\n",
 		host, winapi.CurrentUserName(), s.Session, version.Version, c.CompanyName)
 	fmt.Fprintf(&b, "Summary:    %s\r\n\r\n", s.summary())
-	fmt.Fprintf(&b, "OneDrive set up: %v   running: %v   updating: %v   'not running' alert ignored: %v   'folders' alert ignored: %v\r\n",
-		s.Configured, s.Running, s.Updating, s.Snoozed, s.OrphanSnooze.Active)
+	fmt.Fprintf(&b, "OneDrive set up: %v   running: %v (unknown: %v)   updating: %v   'not running' alert ignored: %v   'folders' alert ignored: %v\r\n",
+		s.Configured, s.Running, s.Unknown, s.Updating, s.Snoozed, s.OrphanSnooze.Active)
 	if !s.MissingSince.IsZero() {
 		fmt.Fprintf(&b, "Missing since: %s\r\n", s.MissingSince.Format(time.RFC3339))
 	}

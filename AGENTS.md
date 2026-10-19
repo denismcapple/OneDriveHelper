@@ -25,4 +25,8 @@ Go may not be on PATH in bash: use `"/c/Program Files/Go/bin/go.exe"`, or in Pow
 - Recovery (`remediate.Recover`) runs only in the user's agent (at start and before planning). It never runs elevated or in a dry run; `BuildPlan`, `remediate --dry-run` and `remediate-approve` only list interrupted runs (`ListInterrupted`).
 - Cross-process names live in `internal/ipc` (agent mutex, stop event, fix lock). `internal/service` must not import `internal/agent`, `internal/popup` or `internal/remediate` (enforced by a test).
 - The fix lock `Global\OneDriveHelperFixing` wraps `Execute` only (not the dialogs or the UAC wait). The installer waits up to 30 minutes while it exists. `Execute` takes a stop func and checks it before starting and before each folder's move.
+- OneDrive's process state is three-valued (`onedrive.OneDriveState`: running / not running / unknown). A failed process listing is unknown: never restart, alert or move the outage clock on it.
+- Wrap every button, menu and tray action in `Agent.safe` (logs the panic with its stack); goroutines started by `internal/popup` use `safeRun`. A panic in the fix runs recovery straight away.
+- Elevation for the fix and the settings tool goes through `winapi.RunElevatedWithDeadline` (15 minutes); the elevated side gets `--deadline` and refuses to act after it.
+- Upgrades stage `*.new`, swap with unique `*.old-<timestamp>` names and roll back on any failure (`internal/service/upgrade.go`).
 - `onedrive.Gather` records sources it could not read in `Inputs.ReadErrors`; with any read error, `IsActive` is true for every path. A missing key is empty, not an error.

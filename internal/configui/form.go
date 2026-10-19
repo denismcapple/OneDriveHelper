@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 
@@ -377,8 +379,14 @@ func (f *form) save() {
 			return
 		}
 		exe, _ := os.Executable()
-		code, err := winapi.RunElevatedAndWait(exe, []string{"--import", tmp.Name()})
+		deadline := time.Now().Add(15 * time.Minute)
+		code, err, returned := winapi.RunElevatedWithDeadline(exe,
+			[]string{"--import", tmp.Name(), "--deadline", strconv.FormatInt(deadline.Unix(), 10)}, deadline)
 		switch {
+		case errors.Is(err, winapi.ErrTimedOut):
+			winapi.Warn(windowTitle, "Nobody approved saving the settings within 15 minutes, so nothing was saved.")
+			<-returned // the temp file must stay until the stale prompt is gone
+			return
 		case errors.Is(err, winapi.ErrCancelled):
 			return
 		case err != nil:

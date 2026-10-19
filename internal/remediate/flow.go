@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,10 +26,49 @@ const (
 	ExitNoSpace     = 5
 )
 
-// RunApproval is "OneDriveHelperAgent.exe remediate-approve --sid <SID>". It
-// runs elevated (UAC), independently re-detects the user's orphaned folders,
-// shows the plan and records the administrator's decision. It changes nothing.
-func RunApproval(sid string) int {
+// Approval time limits (KTD12). The agent gives up waiting at approvalDeadline;
+// the elevated approval dialog closes itself after approvalDialogLimit, or at
+// the deadline if that comes first. Vars so tests can shorten them.
+var (
+	approvalDeadline    = 15 * time.Minute
+	approvalDialogLimit = 10 * time.Minute
+)
+
+// ParseDeadline reads the --deadline argument (Unix seconds). A missing or
+// malformed value falls back to approvalDeadline from start.
+func ParseDeadline(arg string, start time.Time) time.Time {
+	if n, err := strconv.ParseInt(strings.TrimSpace(arg), 10, 64); err == nil && n > 0 {
+		return time.Unix(n, 0)
+	}
+	return start.Add(approvalDeadline)
+}
+
+// decideApproval shows the approval dialog (via confirm, which gets the
+// dialog's time limit) and returns the exit code and the event to log.
+// After either limit nothing is approved and 5001 is never logged.
+func decideApproval(deadline time.Time, now func() time.Time, confirm func(limit time.Duration) (ok, timedOut bool)) (int, uint32) {
+	limit := approvalDialogLimit
+	if rem := deadline.Sub(now()); rem < limit {
+		limit = rem
+	}
+	if limit <= 0 {
+		return ExitCancelled, elog.ApprovalTimedOut
+	}
+	ok, timedOut := confirm(limit)
+	switch {
+	case timedOut || !now().Before(deadline):
+		return ExitCancelled, elog.ApprovalTimedOut
+	case !ok:
+		return ExitCancelled, elog.RemediationCancelled
+	}
+	return ExitApproved, elog.RemediationStarted
+}
+
+// RunApproval is "OneDriveHelperAgent.exe remediate-approve --sid <SID>
+// --deadline <unix>". It runs elevated (UAC), independently re-detects the
+// user's orphaned folders, shows the plan and records the administrator's
+// decision. It changes nothing.
+func RunApproval(sid string, deadline time.Time) int {
 	if winapi.IsElevated() {
 		_ = logx.PrepareProgramDataDir()
 	}
@@ -36,6 +76,14 @@ func RunApproval(sid string) int {
 	ev := elog.Open()
 	defer ev.Close()
 	cfg := config.Load()
+	timedOut := func() int {
+		lg.Printf("approval for %s timed out; nothing changed", sid)
+		ev.Info(elog.ApprovalTimedOut, "Nobody answered the OneDrive Helper fix approval in time, so nothing was changed.")
+		return ExitCancelled
+	}
+	if !time.Now().Before(deadline) {
+		return timedOut() // approved too late: the user has already been told nothing changed
+	}
 	if !winapi.IsElevated() {
 		winapi.Error(cfg.Title(), "Administrator approval is required for this action.")
 		return ExitError
@@ -66,17 +114,58 @@ func RunApproval(sid string) int {
 		return ExitNoSpace
 	}
 	admin := winapi.CurrentUserName()
-	if !winapi.Confirm(cfg.Title()+" - administrator approval",
-		"Approve fixing these library folders?\n\n"+plan.Summary()+
-			"\nFiles stored on this PC are saved first; then the broken folders are removed and OneDrive is asked to sync the libraries again.") {
+	code, event := decideApproval(deadline, time.Now, func(limit time.Duration) (bool, bool) {
+		return winapi.ConfirmWithin(cfg.Title()+" - administrator approval",
+			"Approve fixing these library folders?\n\n"+plan.Summary()+
+				"\nFiles stored on this PC are saved first; then the broken folders are removed and OneDrive is asked to sync the libraries again.", limit)
+	})
+	switch event {
+	case elog.ApprovalTimedOut:
+		return timedOut()
+	case elog.RemediationCancelled:
 		lg.Printf("%s declined remediation for %s", admin, t.UserName)
 		ev.Info(elog.RemediationCancelled, fmt.Sprintf("%s declined remediation for %s.", admin, t.UserName))
-		return ExitCancelled
+	default:
+		lg.Printf("%s approved remediation for %s:\n%s", admin, t.UserName, plan.Summary())
+		ev.Info(elog.RemediationStarted, fmt.Sprintf("%s approved remediation for %s:\r\n%s", admin, t.UserName, plan.Summary()))
 	}
-	lg.Printf("%s approved remediation for %s:\n%s", admin, t.UserName, plan.Summary())
-	ev.Info(elog.RemediationStarted, fmt.Sprintf("%s approved remediation for %s:\r\n%s", admin, t.UserName, plan.Summary()))
-	return ExitApproved
+	return code
 }
+
+// flowEnv is the outside world of UserFlow (replaced in tests).
+type flowEnv struct {
+	target  func() (Target, error)
+	recover func(t Target, lg *log.Logger)
+	plan    func(t Target, cfg config.Config) (*Plan, error)
+	elevate func(exe string, args []string, deadline time.Time) (uint32, error, <-chan struct{})
+	execute func(p *Plan, lg *log.Logger, ev *elog.Log, stop func() bool) (*Result, error)
+	resync  func(orphans []onedrive.Orphan, lg *log.Logger)
+	info    func(title, text string)
+	warn    func(title, text string)
+	fail    func(title, text string)
+	confirm func(title, text string) bool
+}
+
+func defaultFlowEnv() flowEnv {
+	return flowEnv{
+		target: CurrentUserTarget,
+		recover: func(t Target, lg *log.Logger) {
+			ev := elog.Open()
+			defer ev.Close()
+			Recover(t, lg, ev)
+		},
+		plan:    BuildPlan,
+		elevate: winapi.RunElevatedWithDeadline,
+		execute: Execute,
+		resync:  Resync,
+		info:    winapi.Info,
+		warn:    winapi.Warn,
+		fail:    winapi.Error,
+		confirm: winapi.Confirm,
+	}
+}
+
+var flow = defaultFlowEnv()
 
 // UserFlow runs in the user's agent when they click "Fix". busy(true/false)
 // brackets the file work so the caller can show a progress popup. stop
@@ -84,20 +173,16 @@ func RunApproval(sid string) int {
 // starts after that, and no further folder is moved.
 func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool) {
 	cfg := config.Load()
-	t, err := CurrentUserTarget()
+	t, err := flow.target()
 	if err != nil {
-		winapi.Error(cfg.Title(), err.Error())
+		flow.fail(cfg.Title(), err.Error())
 		return
 	}
 	// Finish or report any earlier fix that was interrupted before planning a new one.
-	func() {
-		ev := elog.Open()
-		defer ev.Close()
-		Recover(t, lg, ev)
-	}()
-	plan, err := BuildPlan(t, cfg)
+	flow.recover(t, lg)
+	plan, err := flow.plan(t, cfg)
 	if err != nil {
-		winapi.Error(cfg.Title(), err.Error()+"\n\n"+cfg.SupportContact())
+		flow.fail(cfg.Title(), err.Error()+"\n\n"+cfg.SupportContact())
 		return
 	}
 	if len(plan.Interrupted) > 0 {
@@ -105,24 +190,24 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		for _, i := range plan.Interrupted {
 			b.WriteString(i.Text())
 		}
-		winapi.Warn(cfg.Title(), "An earlier fix did not finish, and these folders are not where they were:\n\n"+b.String()+
+		flow.warn(cfg.Title(), "An earlier fix did not finish, and these folders are not where they were:\n\n"+b.String()+
 			"\nPlease contact support before fixing anything else. "+cfg.SupportContact())
 		return
 	}
 	if len(plan.Items) == 0 {
 		if len(plan.Excluded) > 0 {
-			winapi.Warn(cfg.Title(), "These folders need to be fixed by your support team:\n\n"+strings.Join(plan.Excluded, "\n")+"\n\n"+cfg.SupportContact())
+			flow.warn(cfg.Title(), "These folders need to be fixed by your support team:\n\n"+strings.Join(plan.Excluded, "\n")+"\n\n"+cfg.SupportContact())
 		} else {
-			winapi.Info(cfg.Title(), "Good news: no broken library folders were found. Everything looks fine.")
+			flow.info(cfg.Title(), "Good news: no broken library folders were found. Everything looks fine.")
 		}
 		return
 	}
 	if !cfg.RemediationEnabled {
-		winapi.Warn(cfg.Title(), "Automatic fixing is disabled on this PC. "+cfg.SupportContact())
+		flow.warn(cfg.Title(), "Automatic fixing is disabled on this PC. "+cfg.SupportContact())
 		return
 	}
 	if !plan.EnoughSpace() {
-		winapi.Error(cfg.Title(), "There is not enough free disk space to safely save your files first.\n\n"+plan.Summary()+"\n"+cfg.SupportContact())
+		flow.fail(cfg.Title(), "There is not enough free disk space to safely save your files first.\n\n"+plan.Summary()+"\n"+cfg.SupportContact())
 		return
 	}
 	var list strings.Builder
@@ -136,21 +221,28 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		step3 = "  3. Ask OneDrive to sync the libraries again. Where that can't be done automatically\n" +
 			"      (see above), you will need to click 'Sync' on the library's web page.\n"
 	}
-	if !winapi.Confirm(cfg.Title(), "These folders are no longer syncing with OneDrive:\n\n"+list.String()+
+	if !flow.confirm(cfg.Title(), "These folders are no longer syncing with OneDrive:\n\n"+list.String()+
 		"\nThe fix will:\n  1. Save a copy of the files stored on this PC to "+plan.BackupDir+"\n"+
 		"  2. Remove the broken folders\n"+step3+"\n"+
 		"An administrator must approve this. Your support team may need to enter their credentials.\n\n"+
 		"If you are unsure, stop here. "+cfg.SupportContact()+"\n\nContinue?") {
 		return
 	}
-	code, err := winapi.RunElevatedAndWait(agentExe, []string{"remediate-approve", "--sid", t.SID})
+	deadline := time.Now().Add(approvalDeadline)
+	code, err, returned := flow.elevate(agentExe, []string{"remediate-approve", "--sid", t.SID,
+		"--deadline", strconv.FormatInt(deadline.Unix(), 10)}, deadline)
 	switch {
+	case errors.Is(err, winapi.ErrTimedOut):
+		lg.Printf("approval not answered within %s; nothing changed", approvalDeadline)
+		flow.info(cfg.Title(), "Nobody approved the fix within 15 minutes, so nothing was changed.\n\n"+cfg.SupportContact())
+		<-returned // keep "fixing" set until the stale UAC prompt is gone, so no second prompt appears
+		return
 	case errors.Is(err, winapi.ErrCancelled):
-		winapi.Info(cfg.Title(), "Cancelled. No changes were made.\n\n"+cfg.SupportContact())
+		flow.info(cfg.Title(), "Cancelled. No changes were made.\n\n"+cfg.SupportContact())
 		return
 	case err != nil:
 		lg.Printf("elevate: %v", err)
-		winapi.Error(cfg.Title(), "Could not request administrator approval: "+err.Error())
+		flow.fail(cfg.Title(), "Could not request administrator approval: "+err.Error())
 		return
 	case code != ExitApproved:
 		lg.Printf("approval step exited with %d", code)
@@ -158,13 +250,13 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	}
 
 	// Approved: re-check that nothing changed since the plan was shown.
-	again, err := BuildPlan(t, cfg)
+	again, err := flow.plan(t, cfg)
 	if err != nil || again.Paths() != plan.Paths() || !again.EnoughSpace() {
-		winapi.Warn(cfg.Title(), "The folders changed while waiting for approval, so nothing was done. Please try again.")
+		flow.warn(cfg.Title(), "The folders changed while waiting for approval, so nothing was done. Please try again.")
 		return
 	}
 	if stop() {
-		winapi.Info(cfg.Title(), notStarted)
+		flow.info(cfg.Title(), notStarted)
 		return
 	}
 	ev := elog.Open()
@@ -177,19 +269,23 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		defer release()
 	}
 	if stop() {
-		winapi.Info(cfg.Title(), notStarted)
+		flow.info(cfg.Title(), notStarted)
 		return
 	}
 	busy(true)
-	res, err := Execute(again, lg, ev, stop)
+	res, err := flow.execute(again, lg, ev, stop)
 	busy(false)
 	if err != nil {
 		lg.Printf("execute: %v", err)
-		winapi.Error(cfg.Title(), "The fix could not be completed:\n\n"+err.Error()+"\n\n"+cfg.SupportContact())
+		flow.fail(cfg.Title(), "The fix could not be completed:\n\n"+err.Error()+"\n\n"+cfg.SupportContact())
 		return
 	}
 	lg.Printf("result:\n%s", res.Text())
-	winapi.Info(cfg.Title(), resultMessage(res, cfg))
+	if res.OK() {
+		flow.info(cfg.Title(), resultMessage(res, cfg))
+	} else {
+		flow.warn(cfg.Title(), resultMessage(res, cfg))
+	}
 	// Re-sync only folders that were fully fixed: rebuilding a library over a
 	// folder that was put back or kept in staging would mix them up.
 	done := res.Done()
@@ -199,7 +295,7 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 			orphans = append(orphans, it.Orphan)
 		}
 	}
-	Resync(orphans, lg)
+	flow.resync(orphans, lg)
 }
 
 // resultMessage is what the user is told after a fix. It only mentions the

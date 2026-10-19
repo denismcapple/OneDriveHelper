@@ -205,6 +205,65 @@ func RunElevatedAndWait(exe string, args []string) (uint32, error) {
 	return code, err
 }
 
+// ErrTimedOut is returned when an elevated step was not answered in time.
+var ErrTimedOut = errors.New("nobody answered the administrator approval in time")
+
+// RunElevatedWithDeadline is RunElevatedAndWait with a deadline. While the
+// UAC prompt is up ShellExecuteEx blocks, and a standard-user process cannot
+// reliably end the elevated one, so the call runs on its own goroutine. If it
+// has not returned by the deadline the result is ErrTimedOut; whatever the
+// call returns later is discarded. The returned channel closes when the call
+// has really returned (callers wait on it before allowing another attempt).
+func RunElevatedWithDeadline(exe string, args []string, deadline time.Time) (uint32, error, <-chan struct{}) {
+	return WithDeadline(func() (uint32, error) { return RunElevatedAndWait(exe, args) }, deadline)
+}
+
+// WithDeadline runs fn and returns its result, or ErrTimedOut at deadline.
+func WithDeadline(fn func() (uint32, error), deadline time.Time) (uint32, error, <-chan struct{}) {
+	type result struct {
+		code uint32
+		err  error
+	}
+	ch, done := make(chan result, 1), make(chan struct{})
+	go func() {
+		defer close(done)
+		c, err := fn()
+		ch <- result{c, err}
+	}()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		return r.code, r.err, done
+	case <-timer.C:
+		return 0, ErrTimedOut, done
+	}
+}
+
+var procMessageBoxTimeoutW = windows.NewLazySystemDLL("user32.dll").NewProc("MessageBoxTimeoutW")
+
+const mbTimedOut = 32000
+
+// ConfirmWithin is Confirm, but the dialog closes itself after limit
+// (counting as "not confirmed"). timedOut reports that it did.
+func ConfirmWithin(title, text string, limit time.Duration) (ok, timedOut bool) {
+	if limit <= 0 {
+		return false, true
+	}
+	t, _ := windows.UTF16PtrFromString(text)
+	c, _ := windows.UTF16PtrFromString(title)
+	ms := uint32(limit / time.Millisecond)
+	r, _, _ := procMessageBoxTimeoutW.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)),
+		uintptr(MB_OKCANCEL|MB_ICONWARNING|MB_DEFBUTTON2|MB_SETFOREGROUND|MB_TOPMOST), 0, uintptr(ms))
+	switch int32(r) {
+	case mbTimedOut:
+		return false, true
+	case IDOK:
+		return true, false
+	}
+	return false, false
+}
+
 // IsElevated reports whether the current process token is elevated.
 func IsElevated() bool {
 	return windows.GetCurrentProcessToken().IsElevated()
