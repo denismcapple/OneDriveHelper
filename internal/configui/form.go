@@ -86,8 +86,8 @@ func Run(file string) error {
 	}
 	current = f
 	f.inst = call(pGetModuleHandleW, 0)
-	f.font = call(pCreateFontW, uintptr(-f.s(15)), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, ptr(u16("Segoe UI")))
-	f.bold = call(pCreateFontW, uintptr(-f.s(15)), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, ptr(u16("Segoe UI")))
+	f.font = winapi.CreateFont(f.s(15), 400)
+	f.bold = winapi.CreateFont(f.s(15), 600)
 
 	class := u16("OneDriveHelperConfig")
 	wc := wndClassEx{
@@ -104,7 +104,7 @@ func Run(file string) error {
 		h += f.s(40)
 	}
 	style := uintptr(wsOverlapped | wsCaption | wsSysMenu | wsMinimizeBox)
-	r := rect{0, 0, w, h}
+	r := rect{Left: 0, Top: 0, Right: w, Bottom: h}
 	call(pAdjustWindowRectEx, ptr(&r), style, 0, wsExControlPar)
 	ww, wh := r.Right-r.Left, r.Bottom-r.Top
 	x := (int32(call(pGetSystemMetrics, smCxScreen)) - ww) / 2

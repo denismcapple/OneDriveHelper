@@ -107,16 +107,16 @@ func (c *card) layout() {
 	if c.spec.OnHelp != nil {
 		lw, _ := measure(m.fonts.brand, helpLabel, 1000, dtSingleLine)
 		d := m.s(18)
-		c.help = rect{c.w - pad - d - m.s(6) - lw, (c.header - d) / 2, c.w - pad, (c.header-d)/2 + d}
+		c.help = rect{Left: c.w - pad - d - m.s(6) - lw, Top: (c.header - d) / 2, Right: c.w - pad, Bottom: (c.header-d)/2 + d}
 	}
 
 	y := c.header + m.s(14)
 	_, th := measure(m.fonts.title, c.spec.Title, inner, dtWordBreak)
-	c.title = rect{pad, y, pad + inner, y + th}
+	c.title = rect{Left: pad, Top: y, Right: pad + inner, Bottom: y + th}
 	y += th + m.s(6)
 	if c.spec.Body != "" {
 		_, h := measure(m.fonts.body, c.spec.Body, inner, dtWordBreak|dtEditControl)
-		c.body = rect{pad, y, pad + inner, y + h}
+		c.body = rect{Left: pad, Top: y, Right: pad + inner, Bottom: y + h}
 		y += h
 	} else {
 		c.body = rect{}
@@ -128,16 +128,16 @@ func (c *card) layout() {
 		y += m.s(12)
 		var r itemRects
 		_, h := measure(m.fonts.button, it.Title, inner, dtWordBreak|dtEditControl)
-		r.title = rect{pad, y, pad + inner, y + h}
+		r.title = rect{Left: pad, Top: y, Right: pad + inner, Bottom: y + h}
 		y += h
 		if it.Path != "" {
 			_, h = measure(m.fonts.small, it.Path, inner-indent, dtSingleLine)
-			r.path = rect{pad + indent, y + m.s(2), pad + inner, y + m.s(2) + h}
+			r.path = rect{Left: pad + indent, Top: y + m.s(2), Right: pad + inner, Bottom: y + m.s(2) + h}
 			y += h + m.s(4)
 		}
 		if it.Note != "" {
 			_, h = measure(m.fonts.body, it.Note, inner-indent, dtWordBreak|dtEditControl)
-			r.note = rect{pad + indent, y + m.s(2), pad + inner, y + m.s(2) + h}
+			r.note = rect{Left: pad + indent, Top: y + m.s(2), Right: pad + inner, Bottom: y + m.s(2) + h}
 			y += h + m.s(2)
 		}
 		c.items[i] = r
@@ -146,7 +146,7 @@ func (c *card) layout() {
 	if c.spec.Footer != "" {
 		y += m.s(12)
 		_, h := measure(m.fonts.body, c.spec.Footer, inner, dtWordBreak|dtEditControl)
-		c.footer = rect{pad, y, pad + inner, y + h}
+		c.footer = rect{Left: pad, Top: y, Right: pad + inner, Bottom: y + h}
 		y += h
 	}
 
@@ -177,7 +177,7 @@ func (c *card) layout() {
 		for r := len(rows) - 1; r >= 0; r-- { // first-filled row goes at the bottom
 			x := pad + inner
 			for _, i := range rows[r] {
-				c.buttons[i] = rect{x - widths[i], y, x, y + bh}
+				c.buttons[i] = rect{Left: x - widths[i], Top: y, Right: x, Bottom: y + bh}
 				x -= widths[i] + gap
 			}
 			y += bh + gap
@@ -201,15 +201,15 @@ func (c *card) paint(target uintptr) {
 	oldBmp := call(pSelectObject, dc, bmp)
 	call(pSetBkMode, dc, bkTransparent)
 
-	all := rect{0, 0, c.w, c.h}
+	all := rect{Left: 0, Top: 0, Right: c.w, Bottom: c.h}
 	fill(dc, all, colorWhite)
 	header := headerColor(c.spec)
-	fill(dc, rect{0, 0, c.w, c.header}, header)
+	fill(dc, rect{Left: 0, Top: 0, Right: c.w, Bottom: c.header}, header)
 
 	// Header: a white "!" badge and the brand name.
 	pad := m.s(18)
 	d := m.s(18)
-	badge := rect{pad, (c.header - d) / 2, pad + d, (c.header-d)/2 + d}
+	badge := rect{Left: pad, Top: (c.header - d) / 2, Right: pad + d, Bottom: (c.header-d)/2 + d}
 	ellipse(dc, badge, colorWhite)
 	old := call(pSelectObject, dc, m.fonts.button)
 	call(pSetTextColor, dc, header)
@@ -223,7 +223,7 @@ func (c *card) paint(target uintptr) {
 	drawText(dc, mark, &badge, dtCenter|dtVCenter|dtSingleLine|dtNoPrefix)
 	call(pSelectObject, dc, m.fonts.brand)
 	call(pSetTextColor, dc, colorWhite)
-	br := rect{badge.Right + m.s(10), 0, c.w - pad, c.header}
+	br := rect{Left: badge.Right + m.s(10), Top: 0, Right: c.w - pad, Bottom: c.header}
 	if c.help.Right > 0 {
 		br.Right = c.help.Left - m.s(10)
 	}
@@ -232,16 +232,16 @@ func (c *card) paint(target uintptr) {
 	// Header help link: "What does this mean?" followed by an outlined (i).
 	if c.help.Right > 0 {
 		h := c.help
-		icon := rect{h.Right - (h.Bottom - h.Top), h.Top, h.Right, h.Bottom}
+		icon := rect{Left: h.Right - (h.Bottom - h.Top), Top: h.Top, Right: h.Right, Bottom: h.Bottom}
 		fillIcon := header
 		if c.hover == helpHit {
 			fillIcon = colorWhite
 		}
 		circle(dc, icon, fillIcon, colorWhite, m.s(2))
-		lbl := rect{h.Left, 0, icon.Left - m.s(6), c.header}
+		lbl := rect{Left: h.Left, Top: 0, Right: icon.Left - m.s(6), Bottom: c.header}
 		drawText(dc, helpLabel, &lbl, dtVCenter|dtSingleLine|dtNoPrefix)
 		if c.hover == helpHit { // underline the label on hover
-			fill(dc, rect{lbl.Left, h.Bottom - m.s(1), lbl.Right, h.Bottom}, colorWhite)
+			fill(dc, rect{Left: lbl.Left, Top: h.Bottom - m.s(1), Right: lbl.Right, Bottom: h.Bottom}, colorWhite)
 		}
 		call(pSelectObject, dc, m.fonts.button)
 		if c.hover == helpHit {
@@ -315,11 +315,11 @@ func (c *card) paint(target uintptr) {
 
 func (c *card) hit(lParam uintptr) int {
 	x, y := int32(int16(lParam&0xFFFF)), int32(int16((lParam>>16)&0xFFFF))
-	if c.help.Right > 0 && c.help.contains(x, y) {
+	if c.help.Right > 0 && c.help.Contains(x, y) {
 		return helpHit
 	}
 	for i, r := range c.buttons {
-		if r.contains(x, y) {
+		if r.Contains(x, y) {
 			return i
 		}
 	}
@@ -347,7 +347,7 @@ func (c *card) click(i int) {
 		for j, it := range b.Menu {
 			call(pAppendMenuW, menu, 0, uintptr(j+1), ptr(u16(it.Label)))
 		}
-		pt := point{c.buttons[i].Left, c.buttons[i].Top}
+		pt := point{X: c.buttons[i].Left, Y: c.buttons[i].Top}
 		call(pClientToScreen, c.hwnd, ptr(&pt))
 		call(pSetForegroundWindow, c.hwnd) // required so the menu closes when clicking elsewhere
 		cmd := int(call(pTrackPopupMenu, menu, tpmReturnCmd|tpmNoNotify|tpmBottomAlign, uintptr(pt.X), uintptr(pt.Y), 0, c.hwnd, 0))
