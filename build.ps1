@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Builds OneDriveHelper.exe and OneDriveHelperAgent.exe for amd64 and arm64 into .\dist\<arch>.
+  Builds OneDriveHelper.exe, OneDriveHelperAgent.exe and OneDriveHelperConfig.exe for amd64 and arm64 into .\dist\<arch>.
+  For a release (zips + SHA256SUMS.txt) use .\release.ps1.
 .EXAMPLE
   .\build.ps1 -Version 1.0.0
 #>
@@ -27,7 +28,7 @@ foreach ($a in $Arch) {
     $ld = "-s -w -X $pkg.Version=$Version"
     go build -trimpath -ldflags $ld -o "$out\OneDriveHelper.exe" ./cmd/OneDriveHelper
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
-    # GUI subsystem: no console window flashes when toasts/protocol links launch the agent.
+    # GUI subsystem: no console window flashes when the service starts the agent or the settings tool opens.
     go build -trimpath -ldflags "$ld -H=windowsgui" -o "$out\OneDriveHelperAgent.exe" ./cmd/OneDriveHelperAgent
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
     go build -trimpath -ldflags "$ld -H=windowsgui" -o "$out\OneDriveHelperConfig.exe" ./cmd/OneDriveHelperConfig

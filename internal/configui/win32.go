@@ -4,6 +4,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
 
 var (
@@ -35,7 +37,6 @@ var (
 	pGetDpiForSystem               = user32.NewProc("GetDpiForSystem")
 	pSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
 	pSetProcessDPIAware            = user32.NewProc("SetProcessDPIAware")
-	pCreateFontW                   = gdi32.NewProc("CreateFontW")
 	pGetOpenFileNameW              = comdlg32.NewProc("GetOpenFileNameW")
 	pGetSaveFileNameW              = comdlg32.NewProc("GetSaveFileNameW")
 	pGetModuleHandleW              = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetModuleHandleW")
@@ -91,33 +92,19 @@ const (
 	ofnExplorer     = 0x00080000
 )
 
-type rect struct{ Left, Top, Right, Bottom int32 }
+// Shared Win32 types and helpers live in internal/winapi.
+type (
+	rect       = winapi.Rect
+	msg        = winapi.Msg
+	wndClassEx = winapi.WndClassEx
+)
 
-type msg struct {
-	Hwnd    uintptr
-	Message uint32
-	WParam  uintptr
-	LParam  uintptr
-	Time    uint32
-	PtX     int32
-	PtY     int32
-	Private uint32
-}
+var (
+	call = winapi.Call
+	u16  = winapi.U16
+)
 
-type wndClassEx struct {
-	Size       uint32
-	Style      uint32
-	WndProc    uintptr
-	ClsExtra   int32
-	WndExtra   int32
-	Instance   uintptr
-	Icon       uintptr
-	Cursor     uintptr
-	Background uintptr
-	MenuName   *uint16
-	ClassName  *uint16
-	IconSm     uintptr
-}
+func ptr[T any](v *T) uintptr { return winapi.Ptr(v) }
 
 type openFileName struct {
 	StructSize    uint32
@@ -144,18 +131,6 @@ type openFileName struct {
 	Reserved2     uint32
 	FlagsEx       uint32
 }
-
-func call(p *windows.LazyProc, a ...uintptr) uintptr {
-	r, _, _ := p.Call(a...)
-	return r
-}
-
-func u16(s string) *uint16 {
-	p, _ := windows.UTF16PtrFromString(s)
-	return p
-}
-
-func ptr[T any](v *T) uintptr { return uintptr(unsafe.Pointer(v)) }
 
 func sizeOf[T any](v T) uintptr { return unsafe.Sizeof(v) }
 

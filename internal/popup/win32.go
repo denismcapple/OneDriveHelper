@@ -1,9 +1,9 @@
 package popup
 
 import (
-	"unsafe"
-
 	"golang.org/x/sys/windows"
+
+	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
 
 var (
@@ -11,58 +11,54 @@ var (
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
 	dwmapi = windows.NewLazySystemDLL("dwmapi.dll")
 
-	pRegisterClassExW              = user32.NewProc("RegisterClassExW")
-	pCreateWindowExW               = user32.NewProc("CreateWindowExW")
-	pDefWindowProcW                = user32.NewProc("DefWindowProcW")
-	pDestroyWindow                 = user32.NewProc("DestroyWindow")
-	pShowWindow                    = user32.NewProc("ShowWindow")
-	pSetWindowPos                  = user32.NewProc("SetWindowPos")
-	pGetMessageW                   = user32.NewProc("GetMessageW")
-	pPeekMessageW                  = user32.NewProc("PeekMessageW")
-	pTranslateMessage              = user32.NewProc("TranslateMessage")
-	pDispatchMessageW              = user32.NewProc("DispatchMessageW")
-	pPostThreadMessageW            = user32.NewProc("PostThreadMessageW")
-	pPostMessageW                  = user32.NewProc("PostMessageW")
-	pBeginPaint                    = user32.NewProc("BeginPaint")
-	pEndPaint                      = user32.NewProc("EndPaint")
-	pInvalidateRect                = user32.NewProc("InvalidateRect")
-	pGetDC                         = user32.NewProc("GetDC")
-	pReleaseDC                     = user32.NewProc("ReleaseDC")
-	pFillRect                      = user32.NewProc("FillRect")
-	pFrameRect                     = user32.NewProc("FrameRect")
-	pDrawTextW                     = user32.NewProc("DrawTextW")
-	pLoadCursorW                   = user32.NewProc("LoadCursorW")
-	pSetCursor                     = user32.NewProc("SetCursor")
-	pSystemParametersInfoW         = user32.NewProc("SystemParametersInfoW")
-	pTrackMouseEvent               = user32.NewProc("TrackMouseEvent")
-	pSetTimer                      = user32.NewProc("SetTimer")
-	pKillTimer                     = user32.NewProc("KillTimer")
-	pCreatePopupMenu               = user32.NewProc("CreatePopupMenu")
-	pAppendMenuW                   = user32.NewProc("AppendMenuW")
-	pTrackPopupMenu                = user32.NewProc("TrackPopupMenu")
-	pDestroyMenu                   = user32.NewProc("DestroyMenu")
-	pClientToScreen                = user32.NewProc("ClientToScreen")
-	pSetForegroundWindow           = user32.NewProc("SetForegroundWindow")
-	pAnimateWindow                 = user32.NewProc("AnimateWindow")
-	pMessageBeep                   = user32.NewProc("MessageBeep")
-	pGetDpiForSystem               = user32.NewProc("GetDpiForSystem")
-	pSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
-	pSetProcessDPIAware            = user32.NewProc("SetProcessDPIAware")
-	pCreateFontW                   = gdi32.NewProc("CreateFontW")
-	pSelectObject                  = gdi32.NewProc("SelectObject")
-	pDeleteObject                  = gdi32.NewProc("DeleteObject")
-	pDeleteDC                      = gdi32.NewProc("DeleteDC")
-	pSetBkMode                     = gdi32.NewProc("SetBkMode")
-	pSetTextColor                  = gdi32.NewProc("SetTextColor")
-	pCreateSolidBrush              = gdi32.NewProc("CreateSolidBrush")
-	pCreatePen                     = gdi32.NewProc("CreatePen")
-	pRoundRect                     = gdi32.NewProc("RoundRect")
-	pEllipse                       = gdi32.NewProc("Ellipse")
-	pCreateCompatibleDC            = gdi32.NewProc("CreateCompatibleDC")
-	pCreateCompatibleBitmap        = gdi32.NewProc("CreateCompatibleBitmap")
-	pBitBlt                        = gdi32.NewProc("BitBlt")
-	pDwmSetWindowAttribute         = dwmapi.NewProc("DwmSetWindowAttribute")
-	pGetModuleHandleW              = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetModuleHandleW")
+	pRegisterClassExW       = user32.NewProc("RegisterClassExW")
+	pCreateWindowExW        = user32.NewProc("CreateWindowExW")
+	pDefWindowProcW         = user32.NewProc("DefWindowProcW")
+	pDestroyWindow          = user32.NewProc("DestroyWindow")
+	pShowWindow             = user32.NewProc("ShowWindow")
+	pSetWindowPos           = user32.NewProc("SetWindowPos")
+	pGetMessageW            = user32.NewProc("GetMessageW")
+	pPeekMessageW           = user32.NewProc("PeekMessageW")
+	pTranslateMessage       = user32.NewProc("TranslateMessage")
+	pDispatchMessageW       = user32.NewProc("DispatchMessageW")
+	pPostThreadMessageW     = user32.NewProc("PostThreadMessageW")
+	pPostMessageW           = user32.NewProc("PostMessageW")
+	pBeginPaint             = user32.NewProc("BeginPaint")
+	pEndPaint               = user32.NewProc("EndPaint")
+	pInvalidateRect         = user32.NewProc("InvalidateRect")
+	pGetDC                  = user32.NewProc("GetDC")
+	pReleaseDC              = user32.NewProc("ReleaseDC")
+	pFillRect               = user32.NewProc("FillRect")
+	pFrameRect              = user32.NewProc("FrameRect")
+	pDrawTextW              = user32.NewProc("DrawTextW")
+	pLoadCursorW            = user32.NewProc("LoadCursorW")
+	pSetCursor              = user32.NewProc("SetCursor")
+	pSystemParametersInfoW  = user32.NewProc("SystemParametersInfoW")
+	pTrackMouseEvent        = user32.NewProc("TrackMouseEvent")
+	pSetTimer               = user32.NewProc("SetTimer")
+	pKillTimer              = user32.NewProc("KillTimer")
+	pCreatePopupMenu        = user32.NewProc("CreatePopupMenu")
+	pAppendMenuW            = user32.NewProc("AppendMenuW")
+	pTrackPopupMenu         = user32.NewProc("TrackPopupMenu")
+	pDestroyMenu            = user32.NewProc("DestroyMenu")
+	pClientToScreen         = user32.NewProc("ClientToScreen")
+	pSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
+	pAnimateWindow          = user32.NewProc("AnimateWindow")
+	pMessageBeep            = user32.NewProc("MessageBeep")
+	pSelectObject           = gdi32.NewProc("SelectObject")
+	pDeleteObject           = gdi32.NewProc("DeleteObject")
+	pDeleteDC               = gdi32.NewProc("DeleteDC")
+	pSetBkMode              = gdi32.NewProc("SetBkMode")
+	pSetTextColor           = gdi32.NewProc("SetTextColor")
+	pCreateSolidBrush       = gdi32.NewProc("CreateSolidBrush")
+	pCreatePen              = gdi32.NewProc("CreatePen")
+	pRoundRect              = gdi32.NewProc("RoundRect")
+	pEllipse                = gdi32.NewProc("Ellipse")
+	pCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
+	pCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
+	pBitBlt                 = gdi32.NewProc("BitBlt")
+	pDwmSetWindowAttribute  = dwmapi.NewProc("DwmSetWindowAttribute")
+	pGetModuleHandleW       = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetModuleHandleW")
 )
 
 const (
@@ -116,23 +112,23 @@ const (
 
 var hwndTopmost = ^uintptr(0) // (HWND)-1
 
-type rect struct{ Left, Top, Right, Bottom int32 }
+// Shared Win32 types and helpers live in internal/winapi.
+type (
+	rect       = winapi.Rect
+	point      = winapi.Point
+	msg        = winapi.Msg
+	wndClassEx = winapi.WndClassEx
+)
 
-func (r rect) contains(x, y int32) bool {
-	return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom
-}
+var (
+	call        = winapi.Call
+	u16         = winapi.U16
+	createFont  = winapi.CreateFont
+	setDPIAware = winapi.SetDPIAware
+	systemDPI   = winapi.SystemDPI
+)
 
-type point struct{ X, Y int32 }
-
-type msg struct {
-	Hwnd    uintptr
-	Message uint32
-	WParam  uintptr
-	LParam  uintptr
-	Time    uint32
-	Pt      point
-	Private uint32
-}
+func ptr[T any](v *T) uintptr { return winapi.Ptr(v) }
 
 type paintStruct struct {
 	Hdc       uintptr
@@ -143,21 +139,6 @@ type paintStruct struct {
 	Reserved  [32]byte
 }
 
-type wndClassEx struct {
-	Size       uint32
-	Style      uint32
-	WndProc    uintptr
-	ClsExtra   int32
-	WndExtra   int32
-	Instance   uintptr
-	Icon       uintptr
-	Cursor     uintptr
-	Background uintptr
-	MenuName   *uint16
-	ClassName  *uint16
-	IconSm     uintptr
-}
-
 type trackMouseEvent struct {
 	Size      uint32
 	Flags     uint32
@@ -165,29 +146,12 @@ type trackMouseEvent struct {
 	HoverTime uint32
 }
 
-func call(p *windows.LazyProc, a ...uintptr) uintptr {
-	r, _, _ := p.Call(a...)
-	return r
-}
-
-func u16(s string) *uint16 {
-	p, _ := windows.UTF16PtrFromString(s)
-	return p
-}
-
-func ptr[T any](v *T) uintptr { return uintptr(unsafe.Pointer(v)) }
-
 // rgb builds a COLORREF.
 func rgb(r, g, b byte) uintptr { return uintptr(r) | uintptr(g)<<8 | uintptr(b)<<16 }
 
 func drawText(hdc uintptr, s string, r *rect, flags uint32) int32 {
 	u, _ := windows.UTF16FromString(s)
 	return int32(call(pDrawTextW, hdc, ptr(&u[0]), uintptr(len(u)-1), ptr(r), uintptr(flags)))
-}
-
-func createFont(px int32, weight int32) uintptr {
-	return call(pCreateFontW, uintptr(-px), 0, 0, 0, uintptr(weight), 0, 0, 0,
-		1 /*DEFAULT_CHARSET*/, 0, 0, 5 /*CLEARTYPE_QUALITY*/, 0, ptr(u16("Segoe UI")))
 }
 
 func fill(hdc uintptr, r rect, color uintptr) {
@@ -228,24 +192,6 @@ func circle(hdc uintptr, r rect, fillColor, border uintptr, width int32) {
 	call(pSelectObject, hdc, op)
 	call(pDeleteObject, b)
 	call(pDeleteObject, p)
-}
-
-func setDPIAware() {
-	if pSetProcessDpiAwarenessContext.Find() == nil {
-		if call(pSetProcessDpiAwarenessContext, ^uintptr(3)) != 0 { // PER_MONITOR_AWARE_V2 (-4)
-			return
-		}
-	}
-	call(pSetProcessDPIAware)
-}
-
-func systemDPI() int32 {
-	if pGetDpiForSystem.Find() == nil {
-		if d := int32(call(pGetDpiForSystem)); d > 0 {
-			return d
-		}
-	}
-	return 96
 }
 
 func workArea() rect {

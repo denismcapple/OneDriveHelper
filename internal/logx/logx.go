@@ -2,12 +2,15 @@
 package logx
 
 import (
+	"errors"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -21,7 +24,16 @@ var maxSize int64 = 5 << 20
 // cannot be opened the logger falls back to stderr.
 func Open(path string, alsoStderr bool) *log.Logger {
 	var w io.Writer = os.Stderr
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+	dir := filepath.Dir(path)
+	var err error
+	if underProgramData(dir) {
+		// Never create this folder with inherited (user-writable) permissions:
+		// it comes from PrepareProgramDataDir. Until then, log to stderr.
+		_, err = os.Stat(dir)
+	} else {
+		err = os.MkdirAll(dir, 0o755)
+	}
+	if err == nil {
 		if r, err := openRotating(path); err == nil {
 			w = r
 			if alsoStderr {
@@ -116,10 +128,14 @@ func PrepareProgramDataDir() error {
 			}
 		}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+	// Create it with its final descriptor, so it is never visible with
+	// inherited permissions (ProgramData lets users create files).
+	if _, err := os.Lstat(dir); os.IsNotExist(err) {
+		if err := createProtectedDir(dir, programDataSDDL); err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+			return err
+		}
 	}
-	sd, err := windows.SecurityDescriptorFromString("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)")
+	sd, err := windows.SecurityDescriptorFromString(programDataSDDL)
 	if err != nil {
 		return err
 	}
@@ -128,6 +144,31 @@ func PrepareProgramDataDir() error {
 	return windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
 		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
 		owner, nil, dacl, nil)
+}
+
+// programDataSDDL: owned by Administrators; full control for SYSTEM and
+// Administrators, read for Users; not inheriting from ProgramData.
+const programDataSDDL = "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)"
+
+// createProtectedDir creates dir with the given security descriptor in one
+// step (CreateDirectory with security attributes).
+func createProtectedDir(dir, sddl string) error {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return err
+	}
+	sa := windows.SecurityAttributes{SecurityDescriptor: sd}
+	sa.Length = uint32(unsafe.Sizeof(sa))
+	p, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return err
+	}
+	return windows.CreateDirectory(p, &sa)
+}
+
+func underProgramData(dir string) bool {
+	d, pd := strings.ToLower(filepath.Clean(dir)), strings.ToLower(ProgramDataDir())
+	return d == pd || strings.HasPrefix(d, pd+`\`)
 }
 
 func ownedByAdmins(path string) bool {
