@@ -11,6 +11,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/configui"
+	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/version"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
@@ -35,22 +36,24 @@ func main() {
 			file = os.Args[2]
 		}
 		if err := configui.Run(file); err != nil {
-			winapi.Error("OneDrive Helper - Settings", err.Error())
+			msg.Error("The settings window could not be opened", err.Error())
 			os.Exit(1)
 		}
 		return
 	}
 	console := winapi.AttachParentConsole()
-	code, msg := run(os.Args[1:])
+	code, text := run(os.Args[1:])
 	switch {
-	case msg == "":
+	case text == "":
 	case console:
-		fmt.Println(msg)
+		fmt.Println(text)
 	case code != 0: // no console (e.g. started elevated by the settings window)
-		winapi.Error("OneDrive Helper - Settings", msg)
+		msg.Error("The settings were not saved", text)
 	}
 	os.Exit(code)
 }
+
+var msg = dialog.WithBrand("OneDrive Helper - Settings")
 
 func run(args []string) (int, string) {
 	opt := strings.ToLower(strings.TrimLeft(args[0], "-/"))

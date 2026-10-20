@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
@@ -142,7 +143,7 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 	a.stopping = func() bool { return ctx.Err() != nil || (!standalone && !serviceRunning()) }
 	defer a.ev.Close()
 	popup.SetPanicHandler(func(r any, stack []byte) { a.logPanic("popup action", r, stack) })
-	if a.ui, err = popup.Start(); err != nil {
+	if a.ui, err = popup.Shared(); err != nil {
 		a.log.Printf("popup UI unavailable: %v", err)
 	}
 	defer a.ui.RemoveTray()
@@ -150,6 +151,9 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 	a.log.Printf("agent %s started in session %d (standalone=%v)", version.Version, session, standalone)
 	a.ev.Info(elog.AgentStarted, fmt.Sprintf("OneDrive Helper agent started for %s in session %d.", a.user, session))
 	a.recoverFixes()
+	// A fix held up by open files may be waiting for this restart: finish it
+	// now, as the user, before they start opening files.
+	go a.safe("resume after restart", a.resumeAfterRestart)()
 
 	serviceDown := 0
 	timer := time.NewTimer(5 * time.Second)
@@ -482,7 +486,7 @@ func (a *Agent) relaunch() {
 	if err := onedrive.LaunchOneDrive(a.hive); err != nil {
 		a.log.Printf("relaunch: %v", err)
 		cfg := config.Load()
-		winapi.Error(cfg.Title(), "OneDrive could not be started: "+err.Error()+"\n\n"+cfg.SupportContact())
+		dialog.Error("OneDrive could not be started", "OneDrive could not be started: "+err.Error()+"\n\n"+cfg.SupportContact())
 		return
 	}
 	ClearSnooze(a.hive, idNotRunning)
@@ -507,7 +511,7 @@ func (a *Agent) snooze(alert, d string) {
 // support shows the support contact details.
 func (a *Agent) support() {
 	cfg := config.Load()
-	winapi.Info(cfg.Title(), "To get help with OneDrive on this computer:\n\n"+cfg.SupportContact()+
+	dialog.Info("Contact support", "To get help with OneDrive on this computer:\n\n"+cfg.SupportContact()+
 		"\n\nTip: right-click the OneDrive Helper icon next to the clock and choose 'Copy details for support' to include the details.")
 }
 
@@ -540,11 +544,11 @@ func (a *Agent) email() {
 	copied := a.ui.CopyText(report) == nil
 	if err := winapi.ShellOpen(supportMailto(cfg, addr, s, copied)); err != nil {
 		a.log.Printf("open e-mail: %v", err)
-		winapi.Info(cfg.Title(), "No e-mail program could be opened. Please e-mail "+addr+".\n\n"+cfg.SupportContact())
+		dialog.Info("No e-mail program found", "No e-mail program could be opened. Please e-mail "+addr+".\n\n"+cfg.SupportContact())
 		return
 	}
 	if copied {
-		winapi.Info(cfg.Title(), "A new e-mail to "+addr+" has been started.\n\n"+
+		dialog.Info("E-mail started", "A new e-mail to "+addr+" has been started.\n\n"+
 			"The full details for support have been copied: click into the e-mail where it says so and press Ctrl+V to paste them.")
 	}
 }
@@ -558,6 +562,38 @@ func (a *Agent) website() {
 }
 
 func (a *Agent) fix() {
+	a.runFix("fix", func(busy func(bool), stopping func() bool) {
+		exe, err := os.Executable()
+		if err != nil {
+			a.log.Printf("fix: %v", err)
+			return
+		}
+		userFlow := a.userFlow
+		if userFlow == nil {
+			userFlow = remediate.UserFlow
+		}
+		userFlow(exe, a.log, busy, stopping)
+	})
+}
+
+// resumeAfterRestart finishes a fix that was waiting for a restart. While
+// OneDrive is still starting no plan can be made, so it tries again every
+// 20 seconds for up to 15 minutes.
+func (a *Agent) resumeAfterRestart() {
+	a.runFix("resume after restart", func(busy func(bool), stopping func() bool) {
+		for deadline := time.Now().Add(15 * time.Minute); remediate.ResumeAfterRestart(a.log, busy, stopping); {
+			if stopping() || time.Now().After(deadline) {
+				a.log.Printf("resume after restart: OneDrive did not finish starting; will try at the next start")
+				return
+			}
+			time.Sleep(20 * time.Second)
+		}
+	})
+}
+
+// runFix runs f as the agent's one fix at a time: busy(true/false) shows the
+// progress card, stopping reports that the agent is shutting down.
+func (a *Agent) runFix(name string, f func(busy func(bool), stopping func() bool)) {
 	a.mu.Lock()
 	if a.fixing {
 		a.mu.Unlock()
@@ -575,7 +611,7 @@ func (a *Agent) fix() {
 	// once, without waiting for the agent to restart.
 	defer func() {
 		if r := recover(); r != nil {
-			a.logPanic("fix", r, debug.Stack())
+			a.logPanic(name, r, debug.Stack())
 			a.ui.Hide(idFixing)
 			if a.afterPanic != nil {
 				a.afterPanic()
@@ -584,21 +620,12 @@ func (a *Agent) fix() {
 			}
 		}
 	}()
-	exe, err := os.Executable()
-	if err != nil {
-		a.log.Printf("fix: %v", err)
-		return
-	}
 	cfg := config.Load()
 	stopping := a.stopping
 	if stopping == nil {
 		stopping = func() bool { return false }
 	}
-	userFlow := a.userFlow
-	if userFlow == nil {
-		userFlow = remediate.UserFlow
-	}
-	userFlow(exe, a.log, func(busy bool) {
+	f(func(busy bool) {
 		if busy {
 			a.ui.Show(fixingSpec(cfg))
 		} else {
@@ -610,7 +637,7 @@ func (a *Agent) fix() {
 // RunSample shows both alerts with logging-only actions until both are closed
 // (or 10 minutes pass). Used by "OneDriveHelperAgent.exe test-popup".
 func RunSample() error {
-	ui, err := popup.Start()
+	ui, err := popup.Shared()
 	if err != nil {
 		return err
 	}
@@ -637,7 +664,7 @@ func ShowPreview(ui *popup.Manager, cfg config.Config, orphans []onedrive.Orphan
 		return func() {
 			wg.Add(1)
 			defer wg.Done()
-			winapi.Info(cfg.Title(), "Preview: you clicked '"+what+"'. No action is taken in preview mode.")
+			dialog.Info("Preview", "You clicked '"+what+"'. No action is taken in preview mode.")
 		}
 	}
 	acts := Actions{
@@ -650,7 +677,7 @@ func ShowPreview(ui *popup.Manager, cfg config.Config, orphans []onedrive.Orphan
 		Explain: func(topic string) {
 			wg.Add(1)
 			defer wg.Done()
-			winapi.Info(explainTitle, Explain(cfg, topic, orphans))
+			dialog.Info(explainTitle, Explain(cfg, topic, orphans))
 		},
 		CopyDetails: note("Copy details"),
 	}

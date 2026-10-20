@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
@@ -85,20 +87,20 @@ func RunApproval(sid string, deadline time.Time) int {
 		return timedOut() // approved too late: the user has already been told nothing changed
 	}
 	if !winapi.IsElevated() {
-		winapi.Error(cfg.Title(), "Administrator approval is required for this action.")
+		dialog.Error("Administrator approval needed", "Administrator approval is required for this action.")
 		return ExitError
 	}
 	t, err := TargetForSID(sid)
 	if err != nil {
 		lg.Printf("target: %v", err)
-		winapi.Error(cfg.Title(), err.Error())
+		dialog.Error("The fix can't be approved", err.Error())
 		return ExitError
 	}
 	plan, err := BuildPlan(t, cfg)
 	planEvents(ev, t, plan, err)
 	if err != nil {
 		lg.Printf("plan: %v", err)
-		winapi.Error(cfg.Title(), err.Error())
+		dialog.Error("The fix can't be approved", err.Error())
 		return ExitError
 	}
 	if len(plan.Items) == 0 {
@@ -106,19 +108,18 @@ func RunApproval(sid string, deadline time.Time) int {
 		if len(plan.Excluded) > 0 {
 			msg += "\n\nThese need to be fixed manually:\n" + strings.Join(plan.Excluded, "\n")
 		}
-		winapi.Info(cfg.Title(), msg)
+		dialog.Info("Nothing to fix", msg)
 		return ExitNothingToDo
 	}
 	if !plan.EnoughSpace() {
-		winapi.Error(cfg.Title(), "There is not enough free disk space to safely save the files.\n\n"+plan.Summary())
+		dialog.Error("Not enough disk space", "There is not enough free disk space to safely save the files.\n\n"+plan.Summary())
 		ev.Error(elog.RemediationFailed, "Remediation refused (insufficient disk space) for "+t.UserName+"\r\n"+plan.Summary())
 		return ExitNoSpace
 	}
 	admin := winapi.CurrentUserName()
 	code, event := decideApproval(deadline, time.Now, func(limit time.Duration) (bool, bool) {
-		return winapi.ConfirmWithin(cfg.Title()+" - administrator approval",
-			"Approve fixing these library folders?\n\n"+plan.Summary()+
-				"\nFiles stored on this PC are saved first; then the broken folders are removed and OneDrive is asked to sync the libraries again.", limit)
+		return dialog.ConfirmWithin("Administrator approval: fix these folders?", plan.Summary()+
+			"\nFiles stored on this PC are saved first; then the broken folders are removed and OneDrive is asked to sync the libraries again.", "Approve", limit)
 	})
 	switch event {
 	case elog.ApprovalTimedOut:
@@ -156,10 +157,13 @@ type flowEnv struct {
 	elevate func(exe string, args []string, deadline time.Time) (uint32, error, <-chan struct{})
 	execute func(p *Plan, lg *log.Logger, ev *elog.Log, stop func() bool) (*Result, error)
 	resync  func(orphans []onedrive.Orphan, lg *log.Logger)
-	info    func(title, text string)
-	warn    func(title, text string)
-	fail    func(title, text string)
-	confirm func(title, text string) bool
+	info    func(heading, text string)
+	success func(heading, text string)
+	warn    func(heading, text string)
+	fail    func(heading, text string)
+	confirm func(heading, text string) bool
+	// choose shows buttons (primary = accent button) and returns the index clicked.
+	choose func(heading, text string, buttons []string, primary int) int
 }
 
 func defaultFlowEnv() flowEnv {
@@ -174,10 +178,14 @@ func defaultFlowEnv() flowEnv {
 		elevate: winapi.RunElevatedWithDeadline,
 		execute: Execute,
 		resync:  Resync,
-		info:    winapi.Info,
-		warn:    winapi.Warn,
-		fail:    winapi.Error,
-		confirm: winapi.Confirm,
+		info:    dialog.Info,
+		success: dialog.Success,
+		warn:    dialog.Warn,
+		fail:    dialog.Error,
+		confirm: func(heading, text string) bool { return dialog.Confirm(heading, text, "Continue") },
+		choose: func(heading, text string, buttons []string, primary int) int {
+			return dialog.Show(dialog.Message{Heading: heading, Text: text, Kind: dialog.KindWarning, Buttons: buttons, Primary: primary})
+		},
 	}
 }
 
@@ -191,7 +199,7 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	cfg := config.Load()
 	t, err := flow.target()
 	if err != nil {
-		flow.fail(cfg.Title(), err.Error())
+		flow.fail("The fix can't start", err.Error())
 		return
 	}
 	// Finish or report any earlier fix that was interrupted before planning a new one.
@@ -204,11 +212,11 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	}()
 	var refused *RefusedError
 	if errors.As(err, &refused) {
-		flow.warn(cfg.Title(), err.Error()+"\n\n"+cfg.SupportContact())
+		flow.warn("The fix can't start right now", err.Error()+"\n\n"+cfg.SupportContact())
 		return
 	}
 	if err != nil {
-		flow.fail(cfg.Title(), err.Error()+"\n\n"+cfg.SupportContact())
+		flow.fail("The fix can't start", err.Error()+"\n\n"+cfg.SupportContact())
 		return
 	}
 	if len(plan.Interrupted) > 0 {
@@ -216,24 +224,24 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		for _, i := range plan.Interrupted {
 			b.WriteString(i.Text())
 		}
-		flow.warn(cfg.Title(), "An earlier fix did not finish, and these folders are not where they were:\n\n"+b.String()+
+		flow.warn("An earlier fix did not finish", "These folders are not where they were:\n\n"+b.String()+
 			"\nPlease contact support before fixing anything else. "+cfg.SupportContact())
 		return
 	}
 	if len(plan.Items) == 0 {
 		if len(plan.Excluded) > 0 {
-			flow.warn(cfg.Title(), "These folders need to be fixed by your support team:\n\n"+strings.Join(plan.Excluded, "\n")+"\n\n"+cfg.SupportContact())
+			flow.warn("Your support team needs to fix these", strings.Join(plan.Excluded, "\n")+"\n\n"+cfg.SupportContact())
 		} else {
-			flow.info(cfg.Title(), "Good news: no broken library folders were found. Everything looks fine.")
+			flow.success("Nothing needs fixing", "Good news: no broken library folders were found. Everything looks fine.")
 		}
 		return
 	}
 	if !cfg.RemediationEnabled {
-		flow.warn(cfg.Title(), "Automatic fixing is disabled on this PC. "+cfg.SupportContact())
+		flow.warn("Automatic fixing is turned off", "Automatic fixing is disabled on this PC. "+cfg.SupportContact())
 		return
 	}
 	if !plan.EnoughSpace() {
-		flow.fail(cfg.Title(), "There is not enough free disk space to safely save your files first.\n\n"+plan.Summary()+"\n"+cfg.SupportContact())
+		flow.fail("Not enough disk space", "There is not enough free disk space to safely save your files first.\n\n"+plan.Summary()+"\n"+cfg.SupportContact())
 		return
 	}
 	var list strings.Builder
@@ -247,11 +255,11 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		step3 = "  3. Ask OneDrive to sync the libraries again. Where that can't be done automatically\n" +
 			"      (see above), you will need to click 'Sync' on the library's web page.\n"
 	}
-	if !flow.confirm(cfg.Title(), "These folders are no longer syncing with OneDrive:\n\n"+list.String()+
+	if !flow.confirm("Fix these folders?", "These folders are no longer syncing with OneDrive:\n\n"+list.String()+
 		"\nThe fix will:\n  1. Save a copy of the files stored on this PC to "+plan.BackupDir+"\n"+
 		"  2. Remove the broken folders\n"+step3+"\n"+
 		"An administrator must approve this. Your support team may need to enter their credentials.\n\n"+
-		"If you are unsure, stop here. "+cfg.SupportContact()+"\n\nContinue?") {
+		"If you are unsure, stop here. "+cfg.SupportContact()) {
 		return
 	}
 	deadline := time.Now().Add(approvalDeadline)
@@ -260,29 +268,31 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	switch {
 	case errors.Is(err, winapi.ErrTimedOut):
 		lg.Printf("approval not answered within %s; nothing changed", approvalDeadline)
-		flow.info(cfg.Title(), "Nobody approved the fix within 15 minutes, so nothing was changed.\n\n"+cfg.SupportContact())
+		flow.info("Nothing was changed", "Nobody approved the fix within 15 minutes, so nothing was changed.\n\n"+cfg.SupportContact())
 		<-returned // keep "fixing" set until the stale UAC prompt is gone, so no second prompt appears
 		return
 	case errors.Is(err, winapi.ErrCancelled):
-		flow.info(cfg.Title(), "Cancelled. No changes were made.\n\n"+cfg.SupportContact())
+		flow.info("Cancelled", "Cancelled. No changes were made.\n\n"+cfg.SupportContact())
 		return
 	case err != nil:
 		lg.Printf("elevate: %v", err)
-		flow.fail(cfg.Title(), "Could not request administrator approval: "+err.Error())
+		flow.fail("Administrator approval failed", "Could not request administrator approval: "+err.Error())
 		return
 	case code != ExitApproved:
 		lg.Printf("approval step exited with %d", code)
 		return
 	}
+	host, _ := os.Hostname()
+	appr := approvalInfo{At: time.Now(), On: host}
 
 	// Approved: re-check that nothing changed since the plan was shown.
 	again, err := flow.plan(t, cfg)
 	if err != nil || again.Paths() != plan.Paths() || !again.EnoughSpace() {
-		flow.warn(cfg.Title(), "The folders changed while waiting for approval, so nothing was done. Please try again.")
+		flow.warn("Nothing was changed", "The folders changed while waiting for approval, so nothing was done. Please try again.")
 		return
 	}
 	if stop() {
-		flow.info(cfg.Title(), notStarted)
+		flow.info("The fix was not started", notStarted)
 		return
 	}
 	ev := elog.Open()
@@ -295,7 +305,7 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		defer release()
 	}
 	if stop() {
-		flow.info(cfg.Title(), notStarted)
+		flow.info("The fix was not started", notStarted)
 		return
 	}
 	busy(true)
@@ -303,20 +313,32 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	busy(false)
 	if err != nil {
 		lg.Printf("execute: %v", err)
-		flow.fail(cfg.Title(), "The fix could not be completed:\n\n"+err.Error()+"\n\n"+cfg.SupportContact())
+		flow.fail("The fix could not be completed", "The fix could not be completed:\n\n"+err.Error()+"\n\n"+cfg.SupportContact())
 		return
 	}
+	afterExecute(t, cfg, again, res, lg, 0, appr)
+}
+
+// afterExecute tells the user the result (offering a restart or sign-out if
+// folders were held up by open files) and re-syncs the folders that were
+// fully fixed. attempts counts earlier sign-ins that tried to finish this fix.
+func afterExecute(t Target, cfg config.Config, plan *Plan, res *Result, lg *log.Logger, attempts int, appr approvalInfo) {
 	lg.Printf("result:\n%s", res.Text())
-	if res.OK() {
-		flow.info(cfg.Title(), resultMessage(res, cfg))
-	} else {
-		flow.warn(cfg.Title(), resultMessage(res, cfg))
+	handled := attempts < maxRestartAttempts && offerRestart(cfg, t, res, lg, attempts, appr)
+	switch {
+	case handled:
+	case res.OK():
+		flow.success("Folders fixed", resultMessage(res, cfg))
+	case !res.Changed():
+		flow.warn("Nothing was changed", resultMessage(res, cfg))
+	default:
+		flow.warn("The fix was only partly completed", resultMessage(res, cfg))
 	}
 	// Re-sync only folders that were fully fixed: rebuilding a library over a
 	// folder that was put back or kept in staging would mix them up.
 	done := res.Done()
 	var orphans []onedrive.Orphan
-	for _, it := range again.Items {
+	for _, it := range plan.Items {
 		if done[onedrive.Clean(it.Orphan.Path)] {
 			orphans = append(orphans, it.Orphan)
 		}
@@ -327,13 +349,19 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 // resultMessage is what the user is told after a fix. It only mentions the
 // backup folder when something was actually saved there.
 func resultMessage(res *Result, cfg config.Config) string {
+	var s string
 	switch {
 	case res.OK():
-		return "Folders fixed:\n\n" + res.Text() + "\nYour saved files are in:\n" + res.RunDir
+		return res.Text() + "\nYour saved files are in:\n" + res.RunDir
 	case !res.Changed():
-		return "Nothing was changed:\n\n" + res.Text() + "\nYour folders are exactly where they were. " + cfg.SupportContact()
+		s = res.Text() + "\nYour folders are exactly where they were. " + cfg.SupportContact()
+	default:
+		s = res.Text() + "\nA copy of the files that were saved is in:\n" + res.RunDir + "\n\n" + cfg.SupportContact()
 	}
-	return "The fix was only partly completed:\n\n" + res.Text() + "\nA copy of the files that were saved is in:\n" + res.RunDir + "\n\n" + cfg.SupportContact()
+	if res.Report != "" {
+		s += "\n\nFor your support team, the details are in:\n" + res.Report
+	}
+	return s
 }
 
 const notStarted = "OneDrive Helper is being updated or stopped, so the fix was not started. No changes were made. Please try again in a few minutes."
@@ -396,5 +424,5 @@ func Resync(orphans []onedrive.Orphan, lg *log.Logger) {
 	if len(none) > 0 {
 		b.WriteString("These libraries must be re-added manually. " + cfg.SupportContact() + "\n• " + strings.Join(none, "\n• ") + "\n\n")
 	}
-	winapi.Info(cfg.Title(), b.String())
+	dialog.Info("Syncing the libraries again", b.String())
 }

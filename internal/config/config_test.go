@@ -1,6 +1,8 @@
 package config
 
 import (
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,6 +118,74 @@ func TestFileRoundTrip(t *testing.T) {
 		if _, _, err := ReadFile(p); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
+	}
+}
+
+func writePNG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A settings file names its logo relative to itself; Export copies the logo
+// next to the new file and refers to it as logo.png.
+func TestLogoFileRoundTrip(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	writePNG(t, filepath.Join(src, "logo.png"), 250, 75)
+	if err := os.WriteFile(filepath.Join(src, "settings.json"), []byte(`{"CompanyName": "Contoso", "LogoFile": "logo.png"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := ReadFile(filepath.Join(src, "settings.json"))
+	if err != nil || c.LogoPath() != filepath.Join(src, "logo.png") {
+		t.Fatalf("logo should resolve next to the settings file: %q %v", c.LogoPath(), err)
+	}
+	if err := WriteFile(c, filepath.Join(dst, "out.json")); err != nil {
+		t.Fatal(err)
+	}
+	if w, h, err := CheckLogo(filepath.Join(dst, "logo.png")); err != nil || w != 250 || h != 75 {
+		t.Fatalf("logo.png should be copied next to the export: %d x %d %v", w, h, err)
+	}
+	b, _ := os.ReadFile(filepath.Join(dst, "out.json"))
+	if !strings.Contains(string(b), `"LogoFile": "logo.png"`) {
+		t.Errorf("export should refer to logo.png:\n%s", b)
+	}
+	// Re-exporting onto the same folder copies the logo onto itself: harmless.
+	c2, _, err := ReadFile(filepath.Join(dst, "out.json"))
+	if err != nil || WriteFile(c2, filepath.Join(dst, "out.json")) != nil {
+		t.Fatalf("re-export: %v", err)
+	}
+	// From the registry, "logo.png" means the PC's installed copy.
+	if got := (Config{LogoFile: "logo.png"}).LogoPath(); got != InstalledLogo() {
+		t.Errorf("installed logo path: %s", got)
+	}
+}
+
+func TestLogoValidation(t *testing.T) {
+	dir := t.TempDir()
+	big, notPNG := filepath.Join(dir, "big.png"), filepath.Join(dir, "x.png")
+	writePNG(t, big, 2500, 10)
+	if err := os.WriteFile(notPNG, []byte("GIF89a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{"too wide": big, "not a PNG": notPNG, "missing": filepath.Join(dir, "none.png")} {
+		c := Defaults()
+		c.LogoFile = path
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "LogoFile") {
+			t.Errorf("%s: expected a LogoFile error, got %v", name, err)
+		}
+	}
+	p := filepath.Join(dir, "missing.json")
+	if err := os.WriteFile(p, []byte(`{"LogoFile": "logo.png"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ReadFile(p); err == nil {
+		t.Error("a settings file naming a missing logo must be rejected (before install changes anything)")
 	}
 }
 

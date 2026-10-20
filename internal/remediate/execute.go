@@ -31,6 +31,8 @@ type Outcome struct {
 	Error      string      `json:"error,omitempty"`
 	ResyncURL  string      `json:"resyncUrl,omitempty"`
 	WebURL     string      `json:"webUrl,omitempty"`
+	// Locked: skipped because files in it are open (a restart may release them).
+	Locked bool `json:"locked,omitempty"`
 }
 
 // Result is written to manifest.json in the run folder.
@@ -48,6 +50,9 @@ type Result struct {
 	// Stopped is set when OneDrive Helper began stopping (e.g. an upgrade) and
 	// remaining folders were not started.
 	Stopped bool `json:"stopped,omitempty"`
+	// Report is the recovery report written when a folder was left out of
+	// place (kept in staging or partly removed).
+	Report string `json:"report,omitempty"`
 }
 
 // OK reports whether every folder was removed.
@@ -94,6 +99,17 @@ func programsUsing(dir string) []string {
 		return nil
 	})
 	return winapi.ProgramsUsing(files)
+}
+
+// LockedPaths returns the folders skipped because files in them are open.
+func (r *Result) LockedPaths() []string {
+	var out []string
+	for _, o := range r.Outcomes {
+		if o.Locked {
+			out = append(out, o.Path)
+		}
+	}
+	return out
 }
 
 // Done returns the outcomes of folders that were fully fixed.
@@ -212,7 +228,11 @@ func Execute(p *Plan, lg *log.Logger, ev *elog.Log, stop func() bool) (*Result, 
 		res.Stopped = true
 		return res, errors.New("OneDrive Helper is stopping (probably for an upgrade), so the fix was not started")
 	}
+	// A new run never reuses (or overwrites) an earlier run's folders.
 	runID := res.Started.Format("2006-01-02_150405")
+	for n := 2; exists(filepath.Join(FixingRoot(p.Target.ProfileDir), runID)) || exists(filepath.Join(p.BackupDir, runID)); n++ {
+		runID = fmt.Sprintf("%s-%d", res.Started.Format("2006-01-02_150405"), n)
+	}
 	stageDir := filepath.Join(FixingRoot(p.Target.ProfileDir), runID)
 	if err := os.MkdirAll(winapi.LongPath(stageDir), 0o755); err != nil {
 		return res, fmt.Errorf("create %s: %w", stageDir, err)
@@ -299,6 +319,7 @@ func (r *run) folder(it Item, stageDir string, out *Outcome) {
 		out.State = StateSkipped
 		var busy errBusy
 		if errors.As(err, &busy) {
+			out.Locked = true
 			who := "a file in it is open in another program"
 			if progs := programsUsing(o.Path); len(progs) > 0 {
 				who = strings.Join(progs, ", ") + " has a file in it open"
@@ -430,6 +451,18 @@ func (r *run) finish() bool {
 	}
 
 	msg := fmt.Sprintf("Fix for %s finished. Backups: %s\r\n%s", t.UserName, res.RunDir, res.Text())
+	if !terminal || (res.Changed() && !res.OK()) {
+		// Not a clean fix: leave a report a technician can follow, next to the
+		// backups and, if a folder is still out of place, in staging too.
+		dirs := []string{res.RunDir}
+		if !terminal {
+			dirs = append(dirs, res.StagingDir)
+		}
+		if p := writeReport(r.j, r.lg, dirs...); p != "" {
+			res.Report = p
+			msg += "Recovery report: " + p + "\r\n"
+		}
+	}
 	switch {
 	case res.OK():
 		r.info(elog.RemediationCompleted, msg)

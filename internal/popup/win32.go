@@ -45,6 +45,7 @@ var (
 	pSetForegroundWindow    = user32.NewProc("SetForegroundWindow")
 	pAnimateWindow          = user32.NewProc("AnimateWindow")
 	pMessageBeep            = user32.NewProc("MessageBeep")
+	pPostQuitMessage        = user32.NewProc("PostQuitMessage")
 	pSelectObject           = gdi32.NewProc("SelectObject")
 	pDeleteObject           = gdi32.NewProc("DeleteObject")
 	pDeleteDC               = gdi32.NewProc("DeleteDC")
@@ -57,6 +58,10 @@ var (
 	pCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
 	pCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
 	pBitBlt                 = gdi32.NewProc("BitBlt")
+	pSaveDC                 = gdi32.NewProc("SaveDC")
+	pRestoreDC              = gdi32.NewProc("RestoreDC")
+	pIntersectClipRect      = gdi32.NewProc("IntersectClipRect")
+	pMsgWaitForMultipleObj  = user32.NewProc("MsgWaitForMultipleObjectsEx")
 	pDwmSetWindowAttribute  = dwmapi.NewProc("DwmSetWindowAttribute")
 	pGetModuleHandleW       = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetModuleHandleW")
 )
@@ -76,6 +81,11 @@ const (
 	wmTimer         = 0x0113
 	wmMouseMove     = 0x0200
 	wmLButtonUp     = 0x0202
+	wmMouseWheel    = 0x020A
+	wmQuit          = 0x0012
+	pmRemove        = 1
+	qsAllInput      = 0x04FF
+	mwmoInputAvail  = 0x0004
 	wmMouseLeave    = 0x02A3
 	wmPrintClient   = 0x0318
 	wmApp           = 0x8000

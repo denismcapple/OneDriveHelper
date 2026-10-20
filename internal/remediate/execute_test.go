@@ -266,8 +266,11 @@ func TestExecuteSkipsFolderWithOpenFile(t *testing.T) {
 		t.Error("a run that only skipped changed nothing")
 	}
 	msg := resultMessage(res, config.Defaults())
-	if !strings.HasPrefix(msg, "Nothing was changed") || strings.Contains(msg, "saved files are in") {
+	if !strings.Contains(msg, "exactly where they were") || strings.Contains(msg, "saved files are in") {
 		t.Errorf("message: %q", msg)
+	}
+	if !o.Locked || len(res.LockedPaths()) != 1 || res.LockedPaths()[0] != f.lib() {
+		t.Errorf("a folder held open must be marked locked (a restart may release it): %+v", o)
 	}
 }
 

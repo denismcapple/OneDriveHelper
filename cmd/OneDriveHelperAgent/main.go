@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/denismcapple/OneDriveHelper/internal/agent"
-	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
 	"github.com/denismcapple/OneDriveHelper/internal/remediate"
 	"github.com/denismcapple/OneDriveHelper/internal/version"
@@ -24,8 +24,7 @@ func main() {
 func run() int {
 	winapi.EnableVisualStyles()
 	if len(os.Args) < 2 {
-		winapi.Info(version.ProductName, "OneDrive Helper "+version.Version+
-			"\n\nThis program is started automatically by the OneDrive Helper service.")
+		dialog.Info("OneDrive Helper "+version.Version, "This program is started automatically by the OneDrive Helper service.")
 		return 2
 	}
 	switch os.Args[1] {
@@ -48,7 +47,7 @@ func run() int {
 		return remediate.RunApproval(*sid, remediate.ParseDeadline(*deadline, start))
 	case "test-popup":
 		if err := agent.RunSample(); err != nil {
-			winapi.Error(config.Load().Title(), err.Error())
+			dialog.Error("The sample popups could not be shown", err.Error())
 			return 1
 		}
 		return 0

@@ -57,6 +57,7 @@ var (
 func main() {
 	out := flag.String("out", "docs/images", "output folder")
 	cfgExe := flag.String("config-exe", "dist/amd64/OneDriveHelperConfig.exe", "built settings tool (for its screenshot)")
+	logo := flag.String("logo", "", "PNG logo to show on the cards (optional)")
 	flag.Parse()
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		log.Fatal(err)
@@ -68,6 +69,13 @@ func main() {
 		log.Fatal(err)
 	}
 	cfg := agent.DemoConfig()
+	if *logo != "" {
+		abs, err := filepath.Abs(*logo)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cfg.LogoFile = abs
+	}
 
 	for name, spec := range agent.DocSpecs(cfg) {
 		img, err := ui.Snapshot(spec)
@@ -84,14 +92,13 @@ func main() {
 	}
 	save(filepath.Join(*out, "tray-icons.png"), icons)
 
-	// "What does this mean?" dialog.
-	go winapi.Info("What does this mean?", agent.Explain(cfg, "orphans", agent.DemoOrphans()))
-	if h := waitWindow("#32770", "What does this mean?"); h != 0 {
-		save(filepath.Join(*out, "what-does-this-mean.png"), decorate(capture(h), 8))
-		pPostMessageW.Call(h, 0x0010, 0, 0) // WM_CLOSE
-	} else {
-		log.Print("explanation dialog not found")
+	// "What does this mean?" card.
+	img, err := ui.Snapshot(popup.Spec{Severity: popup.Info, Brand: cfg.Title(), Accent: cfg.AccentColor, Logo: cfg.LogoPath(),
+		Title: "What does this mean?", Body: agent.Explain(cfg, "orphans", agent.DemoOrphans()), Buttons: []popup.Button{{Label: "OK", Primary: true}}})
+	if err != nil {
+		log.Fatalf("explanation: %v", err)
 	}
+	save(filepath.Join(*out, "what-does-this-mean.png"), decorate(img, 12))
 
 	// Settings tool with a made-up settings file loaded.
 	tmp := filepath.Join(os.TempDir(), "acmecorp-settings.json")
@@ -109,6 +116,9 @@ func main() {
 		_ = cmd.Process.Kill()
 	}
 	os.Remove(tmp)
+	if cfg.LogoFile != "" {
+		os.Remove(filepath.Join(os.TempDir(), config.LogoName)) // copied next to the settings file
+	}
 	fmt.Println("screenshots written to", *out)
 }
 

@@ -57,6 +57,7 @@ const (
 	esMultiline     = 0x0004
 	esAutoVScroll   = 0x0040
 	esAutoHScroll   = 0x0080
+	esReadOnly      = 0x0800
 	esWantReturn    = 0x1000
 	esNumber        = 0x2000
 	bsPushButton    = 0x0000
@@ -143,9 +144,10 @@ func getText(h uintptr) string {
 	return windows.UTF16ToString(buf)
 }
 
-// fileDialog shows the standard Open/Save dialog for JSON files.
-func fileDialog(owner uintptr, save bool, title, initial string) (string, bool) {
-	filter, _ := windows.UTF16FromString("Settings files (*.json)|*.json|All files (*.*)|*.*|")
+// fileDialog shows the standard Open/Save dialog. filter is "Name|*.ext|..."
+// (each entry ending with |), defExt the extension added if none is typed.
+func fileDialog(owner uintptr, save bool, title, initial, filterSpec, defExt string) (string, bool) {
+	filter, _ := windows.UTF16FromString(filterSpec)
 	for i, c := range filter {
 		if c == '|' {
 			filter[i] = 0
@@ -155,7 +157,7 @@ func fileDialog(owner uintptr, save bool, title, initial string) (string, bool) 
 	copy(buf, windows.StringToUTF16(initial))
 	ofn := openFileName{
 		Owner: owner, Filter: &filter[0], FilterIndex: 1, File: &buf[0], MaxFile: uint32(len(buf)),
-		Title: u16(title), DefExt: u16("json"), Flags: ofnExplorer | ofnNoChangeDir | ofnPathMust,
+		Title: u16(title), DefExt: u16(defExt), Flags: ofnExplorer | ofnNoChangeDir | ofnPathMust,
 	}
 	ofn.StructSize = uint32(unsafe.Sizeof(ofn))
 	p := pGetOpenFileNameW

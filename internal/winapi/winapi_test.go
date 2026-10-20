@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+func TestLogonIDIsStableWithinASession(t *testing.T) {
+	a, err := LogonID()
+	if err != nil || a == 0 {
+		t.Fatalf("LogonID: %d %v", a, err)
+	}
+	if b, _ := LogonID(); b != a {
+		t.Errorf("the logon ID must not change within a session: %d then %d", a, b)
+	}
+}
+
 func TestWithDeadlineReturnsResult(t *testing.T) {
 	code, err, done := WithDeadline(func() (uint32, error) { return 7, nil }, time.Now().Add(time.Second))
 	if code != 7 || err != nil {

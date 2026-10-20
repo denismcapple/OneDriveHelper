@@ -2,8 +2,17 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.8.2** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.9.0** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
+> [!WARNING]
+> **0.9.0 has not been fully tested on Remote Desktop (RDS) session hosts yet**, including multi-host farms with FSLogix, Azure Virtual Desktop and Citrix. Take extra care there: try it on one host or a small pilot group first, and keep 0.8.2 available to roll back to. Full testing, including signing out to finish a fix and picking it up on another session host, will be done in the next few days, and this note will be updated then. Single-user workstations are covered by the automated tests, but haven't had the full manual checks in [docs/release-checklist.md](docs/release-checklist.md) yet either.
+
+> **New in 0.9.0: nicer popups, your logo, and fixes that finish themselves.**
+> * **Card popups instead of Windows message boxes.** Every question and message (the fix confirmation and result, the administrator approval, contact details, "What does this mean?", the settings tool) now uses the same style of card as the alerts. Long ones scroll, and warnings have a **Copy text** button.
+> * **Company logo.** Pick a PNG in the settings tool (250 x 75 pixels works well). It's shown at the top of every card, and **Export** saves it as `logo.png` next to the settings file. See [The settings tool](#the-settings-tool).
+> * **Locked files no longer stop a fix for good.** If a program won't let go of a file, the user can restart (on a single-user workstation) or sign out (on Remote Desktop and virtual desktops). The fix then finishes by itself at their next sign-in, on whichever session host they land on, with no second approval. See [When files are locked](#when-files-are-locked).
+> * **Recovery report.** A fix that doesn't finish cleanly leaves a `RECOVERY-REPORT.txt` saying where each folder is, where its backup is, and which copy has the user's latest edits. A new fix never overwrites an earlier backup.
+>
 > **New in 0.8.2: clean event log entries.** Event Viewer no longer puts "The description for Event ID ... cannot be found" above every OneDrive Helper event; the event text is now built into the tool. Upgrading fixes events already in the log too. Event IDs are unchanged, so RMM monitors keep working. See [Getting alerts in your RMM](#getting-alerts-in-your-rmm).
 >
 > **New in 0.8.1: no more false alarms on new PCs.** Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are no longer reported. A freshly set-up PC signed in to a work account always has an empty, unused `OneDrive` folder, which 0.7.0 and 0.8.0 wrongly flagged as "stopped syncing". The alert's heading now also says "OneDrive folder" rather than "SharePoint library" when the list includes a leftover organisation folder.
@@ -34,10 +43,10 @@ We got tired of finding out about these the hard way, so we wrote something that
   Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are never flagged.
 * **Explains it in plain English.** Every alert has a **What does this mean?** link written for people who don't know or care how OneDrive works.
 * **Makes it easy to get help.** **Contact support** offers to e-mail your service desk with a full diagnostic report already in the message, or to open your support website.
-* **Fixes broken folders safely**, after an administrator approves. It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again. If anything is in doubt, nothing is deleted and the folder goes back where it was.
+* **Fixes broken folders safely**, after an administrator approves. It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again. If anything is in doubt, nothing is deleted and the folder goes back where it was. If files are locked by a program that won't let go, it can offer a restart (or, on Remote Desktop and virtual desktops, a sign-out) and finish the fix by itself when the user signs in again, even on a different session host.
 * **Puts a status icon in the system tray**, so when a user rings you, you can see straight away what's wrong, even if they closed the alert.
 * **Writes everything to the Windows event log**, so your RMM can raise a ticket or alert you.
-* **Can be branded per customer**: company name, support contact, colours and wording, all set from a settings file you push out with your RMM.
+* **Can be branded per customer**: company name, logo, support contact, colours and wording, all set from a settings file you push out with your RMM.
 
 It's written in Go, runs as a normal Windows service, and has no dependencies to install. There's no PowerShell at runtime, no .NET, and no cloud service.
 
@@ -67,15 +76,17 @@ The alerts appear in the bottom right corner of the screen. They're deliberately
 
 Each alert can be ignored for a while (5 minutes, 30 minutes, until the next restart, or whatever choices you configure). Ignoring one alert doesn't hide the other. If a *new* folder breaks, its alert comes straight back.
 
+Questions and messages (the fix confirmation and its result, the administrator approval, contact details, "What does this mean?", and the settings tool's messages) use the same cards instead of Windows message boxes. If you set a company logo, it's shown at the top of every card. Long messages scroll with the mouse wheel, and warnings and errors have a **Copy text** button so users can paste the details into a ticket.
+
 **What does this mean?**
 
-<img src="docs/images/what-does-this-mean.png" width="312" alt="Plain English explanation of the problem">
+<img src="docs/images/what-does-this-mean.png" width="477" alt="Plain English explanation of the problem">
 
 **The tray icon** goes green, amber or red:
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.8.2 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.9.0 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -92,12 +103,14 @@ Fixing a broken folder means deleting it from the PC, so we were careful:
 
 1. **The user confirms.** They're told which folders will be fixed and whether each one can be reconnected automatically.
 2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it. If nobody answers within 15 minutes, the user is told nothing changed (event 5010); the approval window closes itself after 10 minutes, and a late approval does nothing.
-3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told which program to close (for example "Microsoft Excel has a file in it open") and to try again; other folders carry on. If every folder was skipped, the user is told plainly that nothing was changed.
+3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told which program to close (for example "Microsoft Excel has a file in it open") and to try again; other folders carry on. If every folder was skipped, the user is told plainly that nothing was changed. See [When files are locked](#when-files-are-locked) for the restart option.
 4. **Files are saved.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts. Each copy is written to disk, its size checked, and the original is confirmed unchanged while it was being read.
 5. **Only proven copies are deleted.** Before deleting anything, every file is checked again: it must have been copied in this run and be unchanged since, and nothing may have it open for writing. If even one file doesn't pass (or anything new appeared), nothing is deleted and the folder is put back where it was. If OneDrive has started syncing the old location again in the meantime, both copies are kept. A `manifest.json` records every step, before it happens.
 6. **OneDrive is asked to sync the library again**, for folders that were fully fixed. Where the library details are known, that's automatic. Otherwise the library's web page opens so the user can click Sync. The leftover shortcuts in Explorer's side panel are cleaned up too.
 
 If the fix is interrupted (a crash, a power cut, the user signing out), the record on disk points at the user's files. The next time the user part starts it either puts the folder back, or reports it once in the status window and in the event log (5007) so you can sort it out. Recovery only ever runs as the user, never with admin rights.
+
+**Recovery report.** Whenever a fix doesn't finish cleanly (a folder put back after a failed copy, kept aside, partly removed, or recovered after an interruption), a `RECOVERY-REPORT.txt` is saved next to the backups in `ODHelper\Saved\<date and time>\`, and in the `Fixing` folder while anything is still there. For each folder it gives the original path, where the folder is now, where its backup is, and which copy holds the user's latest local edits. The event and the message the user sees point to it. A new fix always gets its own `<date and time>` folders, so it never overwrites an earlier backup or report.
 
 Some safety rules that are always applied:
 
@@ -109,9 +122,29 @@ Some safety rules that are always applied:
 * A folder that couldn't be fully read when the fix was planned is never removed, as the confirmation says.
 * A delete that fails part-way (antivirus or a preview holding a file) stops at once. What wasn't deleted stays in the `Fixing` folder and is never moved back half-empty.
 
-**Clearing an unfinished fix.** If the status window or event 5007 reports an unfinished fix, the folder is in `C:\Users\<user>\ODHelper\Fixing\<date and time>\` and its backup in `ODHelper\Saved\<date and time>\`. Check the backup, copy back anything the user needs, then delete that `Fixing\<date and time>` folder. The report clears once the folder is gone.
+**Clearing an unfinished fix.** If the status window or event 5007 reports an unfinished fix, the folder is in `C:\Users\<user>\ODHelper\Fixing\<date and time>\` and its backup in `ODHelper\Saved\<date and time>\`. Read the `RECOVERY-REPORT.txt` there first. Check the backup, copy back anything the user needs, then delete that `Fixing\<date and time>` folder. The status entry clears once the folder is gone.
 
 <img src="docs/images/fix-in-progress.png" width="477" alt="Fix in progress">
+
+### When files are locked
+
+Sometimes a program holds a file open and won't let go, even when the user thinks they've closed it. If that's why a folder was skipped, and `RestartToFinish` is on, the user is offered a way to close everything and let the fix finish by itself:
+
+* **On a workstation with one person signed in:** **Restart now**, **Restart later** or **Not now**.
+* **Everywhere else:** **Sign out now**, **Sign out later** or **Not now**. A restart is never offered on a server, a Remote Desktop or Azure Virtual Desktop session host (including Windows multi-session), with Citrix or VMware Horizon, with FSLogix profile containers, or when someone else is signed in. Signing out closes the user's own programs, which is what holds their files, without affecting anyone else.
+
+At the user's next sign-in, OneDrive Helper finishes the fix by itself before they open anything, with no second administrator approval:
+
+* **Works across session hosts.** The request is saved with the approval details (when, and on which computer) in `%USERPROFILE%\ODHelper\pending-fix.json`. It travels with roaming and FSLogix profiles, together with the folders themselves, so it doesn't matter which host the user lands on next. Any host running OneDrive Helper picks it up.
+* **Waits for a real sign-in.** It only runs in a new sign-in session, never in the one the request was made in. Requests expire after 3 days.
+* **Same safety checks.** The fix runs as the user, exactly as it would have the first time, and only on folders that are still broken and were in the request. If a folder is still in use, it tries once more at the following sign-in, then tells the user to contact support.
+
+The file is in the user's own profile, so the user could edit it. That can only make OneDrive Helper fix real broken folders in their own profile, as them, with every safety check, which they could delete by hand anyway.
+
+Events 5014 (restart or sign-out requested) and 5015 (fix being finished after signing in again) record what happened.
+
+> [!CAUTION]
+> The sign-out path, and finishing a fix on a different session host, have not yet been fully tested on real RDS, Azure Virtual Desktop or Citrix farms (see the note at the top). Until they have, pilot 0.9.0 on one host first. If you'd rather not offer it at all, set `RestartToFinish` to `0`: users are then simply asked to close the program and try again, as in 0.8.x.
 
 ## Download
 
@@ -187,12 +220,12 @@ Run `OneDriveHelperConfig.exe` and you get this:
 
 <img src="docs/images/settings-tool.png" width="706" alt="Settings tool">
 
-Click into any field and the line at the bottom tells you what it does. The buttons:
+Click into any field and the line at the bottom tells you what it does. For the company logo, click **Choose...** and pick a PNG; 250 x 75 pixels works well (at most 2000 x 1000 pixels and 2 MB). **Preview alerts** shows it on the real cards. The buttons:
 
 | Button | What it does |
 |---|---|
 | **Import...** | Loads a settings file into the window |
-| **Export...** | Saves the window to a JSON file for deployment |
+| **Export...** | Saves the window to a JSON file for deployment. If you chose a logo, it's saved next to it as `logo.png` |
 | **Reset to defaults** | Fills the window with the built-in defaults |
 | **Preview alerts** | Shows the real popups with your branding, without saving anything |
 | **Save to this PC** | Writes to the registry. It asks for admin rights if it needs them. |
@@ -219,9 +252,12 @@ Settings files are plain JSON using the setting names below. They can be partial
   "SupportEmail": "servicedesk@acmecorp.example",
   "SupportPhone": "+1 555 0100",
   "SupportURL": "https://help.acmecorp.example",
-  "IgnoreOptions": "15m,1h,reboot"
+  "IgnoreOptions": "15m,1h,reboot",
+  "LogoFile": "logo.png"
 }
 ```
+
+`"LogoFile": "logo.png"` means the `logo.png` next to the settings file; the installer copies it to `%ProgramData%\OneDriveHelper\logo.png` on each PC. Leave the line out if you don't use a logo.
 
 Every file is checked before it's applied. Unknown names, wrong types and bad values (a malformed e-mail address, a colour that isn't `#RRGGBB`, a duration out of range) are rejected, and you're told about every problem, not just the first.
 
@@ -238,6 +274,7 @@ Settings live in `HKLM\SOFTWARE\OneDriveHelper`. Changes are picked up within a 
 | `SupportURL` | (empty) | Your support website, offered by **Contact support** (`https://`, `http://` or `mailto:`) |
 | `SupportEmailMethod` | `auto` | `auto` opens a ready-made draft in the user's mail program, with the full report in small monospace text. If there's no desktop mail program, it falls back to a simple e-mail link with the report on the clipboard. `draft` or `link` forces one or the other |
 | `AccentColor` | `#0F6CBD` | Colour of the main buttons |
+| `LogoFile` | (empty) | Company logo (PNG) shown at the top of every card. In a settings file, `logo.png` next to it; on a PC, kept as `%ProgramData%\OneDriveHelper\logo.png`. An absolute path (for example from policy) is used as it is |
 | `NotRunningMessage` | (built in) | Your own wording for the "OneDrive is not running" alert |
 | `OrphanMessage` | (built in) | Your own wording for the "folders stopped syncing" alert |
 | `OneDriveCheckEnabled` | `1` | Turn the "OneDrive not running" check on or off |
@@ -247,6 +284,7 @@ Settings live in `HKLM\SOFTWARE\OneDriveHelper`. Changes are picked up within a 
 | `IgnoreOptions` | `5m,30m,reboot` | Choices in the Ignore menu. Durations from 1m to 24h, and/or `reboot`. Leave it empty to remove the Ignore button |
 | `OrphanCheckEnabled` | `1` | Turn the "folders not syncing" check on or off |
 | `RemediationEnabled` | `1` | Offer the **Fix (admin)** button |
+| `RestartToFinish` | `1` | When files are locked, offer a restart (single-user workstations) or a sign-out (Remote Desktop and virtual desktops), and finish the fix at the next sign-in; see [When files are locked](#when-files-are-locked) |
 | `BackupRoot` | `{Profile}\ODHelper\Saved` | Where the fix saves files. `{Profile}` is the user's profile folder |
 | `FreeSpaceMarginMB` | `1024` | Extra free space the fix insists on, on top of the files being saved |
 | `TrayIconEnabled` | `1` | Show the tray icon |
@@ -272,15 +310,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.8.2; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.9.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.8.2'
+$Version = 'v0.9.0'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = 'DD79E1A9B59EDE1A1C31B348EBDEE1289AC2625C2848F9CA4811BEF99F2710E6'
-    'arm64' = '104B66288E54DD20918FAF0B4E4BB2308EE91DE7A1A4192125417AC48C73BDE2'
+    'x64'   = '7C7C53E7759F2A9F949E3ADE22D6FF029935507177AC73BA079215CD99330446'
+    'arm64' = '77C99313915D79A619D1667E57B44DF7140FECF29141043DE04E932794D97DC9'
 }
 $Settings = @'
 {
@@ -291,6 +329,10 @@ $Settings = @'
   "SupportURL": "https://help.acmecorp.example"
 }
 '@
+# Optional company logo: paste the output of
+#   [Convert]::ToBase64String([IO.File]::ReadAllBytes('logo.png'))
+# here and add "LogoFile": "logo.png" to the settings above. Leave it empty for no logo.
+$LogoBase64 = ''
 
 $arch = if ($env:PROCESSOR_ARCHITEW6432 -eq 'ARM64' -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
 $url  = "https://github.com/denismcapple/OneDriveHelper/releases/download/$Version/OneDriveHelper-$Version-$arch.zip"
@@ -311,6 +353,7 @@ try {
     if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $Hashes[$arch]) { throw "Checksum mismatch for $url" }
     Expand-Archive $zip -DestinationPath $pkg
     $Settings | Set-Content (Join-Path $pkg 'settings.json') -Encoding UTF8
+    if ($LogoBase64) { [IO.File]::WriteAllBytes((Join-Path $pkg 'logo.png'), [Convert]::FromBase64String($LogoBase64)) }
     & (Join-Path $pkg 'OneDriveHelper.exe') install --config (Join-Path $pkg 'settings.json')
     $code = $LASTEXITCODE
 } finally {
@@ -326,13 +369,14 @@ If you'd rather not download from GitHub on every PC, host the zip on your own f
 There's no need to reinstall to change settings. Push a new settings file and import it:
 
 ```powershell
-# $Settings holds the JSON, as in the install script above.
-# The file goes in a private, randomly named folder so nobody can swap it before it's imported.
+# $Settings (and $LogoBase64, if you use a logo) as in the install script above.
+# The files go in a private, randomly named folder so nobody can swap them before they're imported.
 $work = Join-Path $env:TEMP ("OneDriveHelper-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $work | Out-Null
 & icacls.exe $work /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 $file = Join-Path $work 'settings.json'
 $Settings | Set-Content $file -Encoding UTF8
+if ($LogoBase64) { [IO.File]::WriteAllBytes((Join-Path $work 'logo.png'), [Convert]::FromBase64String($LogoBase64)) }
 & "C:\Program Files\OneDriveHelper\OneDriveHelper.exe" config import $file
 $code = $LASTEXITCODE
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
@@ -351,7 +395,7 @@ For a detection rule or a compliance check, look for any of these:
 
 ### Intune (Win32 app)
 
-Put the three programs and your `settings.json` in a folder, wrap it with the Win32 Content Prep Tool, and use:
+Put the three programs, your `settings.json` and (if you use one) `logo.png` in a folder, wrap it with the Win32 Content Prep Tool, and use:
 
 * **Install command:** `OneDriveHelper.exe install --config settings.json`
 * **Uninstall command:** `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" uninstall --purge`
@@ -397,6 +441,8 @@ And for information, if you want the full picture:
 | 5009 | Warning | A folder was refused because a junction or symbolic link is in its path (the link is named) |
 | 5010 | Information | Nobody answered the fix approval in time; nothing changed |
 | 5013 | Warning | No fix was planned: OneDrive's settings couldn't be read, OneDrive was starting up, or it couldn't tell whether OneDrive was running |
+| 5014 | Information | Folders were locked; the user chose to restart or sign out, and the fix will finish at their next sign-in (the folders are listed) |
+| 5015 | Information | A fix that waited for the user to sign in again is being finished (when and on which computer it was approved, and the folders) |
 | 3007 | Warning | The list of running programs couldn't be read 5 checks in a row, so OneDrive Helper can't tell whether OneDrive is running (no restart or alert happens while it can't tell) |
 
 A fix where folders were only skipped, kept or left alone logs those per-folder events, not 5003.
@@ -443,6 +489,7 @@ Log files (each rotates to `<name>.1` at 5 MB, so a log never takes more than ab
 * the service: `%ProgramData%\OneDriveHelper\service.log`
 * fix approvals: `%ProgramData%\OneDriveHelper\remediation.log`
 * each fix: a `manifest.json` in the folder where the files were saved, and, while a fix runs or if it was interrupted, in `%USERPROFILE%\ODHelper\Fixing\<date and time>\`
+* a fix that didn't finish cleanly: `RECOVERY-REPORT.txt` in the same places, saying which copy of each folder to use
 
 The quickest way to get everything in one go is the tray icon's **Copy details for support**, or **Contact support** then **Send an e-mail**.
 
@@ -479,7 +526,7 @@ We were careful about the things that tend to go wrong with tools like this:
 * The service path is always written in quotes, so it can never be an unquoted service path.
 * The service's log folder is locked to administrators, so a user can't plant links to redirect its writes.
 * Files are copied and deleted as the user, not as an administrator, because everything happens inside their own profile. The UAC step is an approval gate to prevent mistakes. Running the file work elevated would let a user redirect admin writes with a junction.
-* The settings tool and installer reject invalid settings outright.
+* The settings tool and installer reject invalid settings outright, including a logo that isn't a PNG within the size limits.
 * Values read from the user's own registry are treated as untrusted. Only `https://` site addresses are ever opened, and only a file called `OneDrive.exe` is ever started.
 * On shared Remote Desktop hosts, one user can't stop another user's alerts. Each session's "already running" marker lives in that session's own private namespace.
 
@@ -490,7 +537,7 @@ There's more in [SECURITY.md](SECURITY.md), including how to report a problem.
 * Alerts appear on the main monitor only.
 * The automatic re-sync uses the same link SharePoint's **Sync** button does. OneDrive may ask the user to confirm, and a library in another organisation (as a guest) may need the user to sign in.
 * If someone moved their OneDrive folder outside their profile, problems there are reported but not fixed automatically.
-* A folder that's open in another program (a document, or an Explorer window inside it) is skipped by the fix. The user is asked to close it and try again.
+* A folder that's open in another program (a document, or an Explorer window inside it) is skipped by the fix. The user is asked to close it and try again. They can also restart (single-user workstations) or sign out (everywhere else), and the fix finishes at their next sign-in. With local, non-roaming profiles on a multi-host farm, the request stays on the host where it was made, so it only finishes when the user signs in there again.
 * A folder containing a junction or symbolic link inside it isn't deleted; it's put back and the reason is shown.
 * Users can turn off notifications for apps in Windows. That doesn't affect these alerts, but if they close the user part, the service just starts it again.
 

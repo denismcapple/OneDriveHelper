@@ -58,6 +58,10 @@ const (
 	FixKept = 5012
 	// FixRefusedData: OneDrive data unreadable, OneDrive starting up, or process state unknown.
 	FixRefusedData = 5013
+	// FixRestartRequested: folders were locked; the fix will finish after the next restart.
+	FixRestartRequested = 5014
+	// FixResumed: a fix held up by open files is being finished after a restart.
+	FixResumed = 5015
 )
 
 // Log is a best-effort event log writer; a nil or failed log silently drops events.

@@ -35,6 +35,7 @@ type Button struct {
 	Dismiss bool       // hide the card when clicked (for menus: when an entry is chosen)
 	Menu    []MenuItem // if set, clicking opens this menu
 	Action  func()
+	Stay    bool // Ask/AskWithin: run Action but keep waiting (e.g. "Copy")
 }
 
 // Item is one listed problem: a bold title, an optional path on its own
@@ -56,6 +57,7 @@ type Spec struct {
 	Sound    bool
 	Accent   string // "#RRGGBB" for primary buttons and Info headers; empty = default blue
 	OnHelp   func() // if set, the header shows "What does this mean? (i)" which calls this
+	Logo     string // PNG file shown above the title (skipped if missing or unusable)
 }
 
 // Manager owns the UI thread and all cards.
@@ -73,6 +75,7 @@ type Manager struct {
 	class  *uint16
 	inst   uintptr
 	tray   trayState
+	logos  map[string]logoEntry
 }
 
 type fonts struct{ brand, title, body, button, small uintptr }
@@ -84,13 +87,28 @@ var (
 	activeMgr   *Manager
 )
 
-// Start creates the UI thread. Only one Manager per process is supported.
+// Start creates the UI thread. Only one Manager per process is supported;
+// use Shared to get it from anywhere in the process.
 func Start() (*Manager, error) {
 	activeMgrMu.Lock()
 	defer activeMgrMu.Unlock()
 	if activeMgr != nil {
 		return nil, errors.New("popup manager already running")
 	}
+	return start()
+}
+
+// Shared returns the process's Manager, starting it if needed.
+func Shared() (*Manager, error) {
+	activeMgrMu.Lock()
+	defer activeMgrMu.Unlock()
+	if activeMgr != nil {
+		return activeMgr, nil
+	}
+	return start()
+}
+
+func start() (*Manager, error) {
 	m := &Manager{reqs: make(chan func(), 64), visible: map[string]bool{}, byHwnd: map[uintptr]*card{}}
 	ready := make(chan error, 1)
 	go m.loop(ready)
@@ -174,6 +192,23 @@ func (m *Manager) Show(s Spec) {
 	}
 	m.setVisible(s.ID, true)
 	m.do(func() { m.show(s) })
+}
+
+// SetButtonLabel changes the label of button i of a shown card.
+func (m *Manager) SetButtonLabel(id string, i int, label string) {
+	if m == nil {
+		return
+	}
+	m.do(func() {
+		for _, c := range m.cards {
+			if c.spec.ID == id && i >= 0 && i < len(c.spec.Buttons) {
+				c.spec.Buttons[i].Label = label
+				c.layout()
+				m.arrange()
+				call(pInvalidateRect, c.hwnd, 0, 0)
+			}
+		}
+	})
 }
 
 // Hide removes a card if shown.
@@ -334,6 +369,9 @@ func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 		if i := c.hit(lParam); i != -1 {
 			c.click(i)
 		}
+		return 0
+	case wmMouseWheel:
+		c.scrollBy(-int32(int16(wParam>>16)) * m.s(48) / 120)
 		return 0
 	}
 	return call(pDefWindowProcW, hwnd, message, wParam, lParam)

@@ -152,16 +152,31 @@ func recoverRun(t Target, dir string, lg *log.Logger, ev *elog.Log) Interrupted 
 			lg.Printf("recovery: update %s: %v", j.path, err)
 		}
 	}
-	if len(report) > 0 {
-		ev.Warning(elog.FixInterrupted, fmt.Sprintf("An interrupted OneDrive Helper fix for %s needs attention. These folders are not where they were:\r\n%s\r\nRun folder: %s",
-			t.UserName, strings.Join(report, "\r\n"), dir))
-		env.onEvent(elog.FixInterrupted)
-	}
 	left := Interrupted{Dir: dir}
 	for _, e := range j.Entries {
 		if !e.State.Terminal() {
 			left.Folders = append(left.Folders, e)
 		}
+	}
+	// Whenever recovery acted, leave a report next to the backups (it stays
+	// after the staging folder is cleaned up), and in staging if anything is
+	// still there.
+	reportPath := ""
+	if changed {
+		dirs := []string{j.RunDir}
+		if len(left.Folders) > 0 {
+			dirs = append(dirs, dir)
+		}
+		reportPath = writeReport(j, lg, dirs...)
+	}
+	if len(report) > 0 {
+		msg := fmt.Sprintf("An interrupted OneDrive Helper fix for %s needs attention. These folders are not where they were:\r\n%s\r\nRun folder: %s",
+			t.UserName, strings.Join(report, "\r\n"), dir)
+		if reportPath != "" {
+			msg += "\r\nRecovery report: " + reportPath
+		}
+		ev.Warning(elog.FixInterrupted, msg)
+		env.onEvent(elog.FixInterrupted)
 	}
 	if len(left.Folders) == 0 {
 		cleanStaging(dir)

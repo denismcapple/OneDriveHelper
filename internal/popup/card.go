@@ -54,8 +54,14 @@ type card struct {
 	help     rect // "What does this mean? (i)" link in the header (empty if no OnHelp)
 	items    []itemRects
 	footer   rect
+	logo     rect
+	logoPx   []uint32
 	hover    int
 	tracking bool
+	// A card taller than the screen scrolls the part between the header and
+	// the buttons (view) by scroll pixels, up to scrollMax.
+	view              rect
+	scroll, scrollMax int32
 }
 
 // helpHit is the hover/click index of the header help link.
@@ -111,6 +117,12 @@ func (c *card) layout() {
 	}
 
 	y := c.header + m.s(14)
+	c.logo, c.logoPx = rect{}, nil
+	if img := m.logo(c.spec.Logo); img != nil {
+		px, lw, lh := fitLogo(img, min(inner, m.s(200)), m.s(40))
+		c.logo, c.logoPx = rect{Left: pad, Top: y, Right: pad + lw, Bottom: y + lh}, px
+		y += lh + m.s(12)
+	}
 	_, th := measure(m.fonts.title, c.spec.Title, inner, dtWordBreak)
 	c.title = rect{Left: pad, Top: y, Right: pad + inner, Bottom: y + th}
 	y += th + m.s(6)
@@ -150,6 +162,8 @@ func (c *card) layout() {
 		y += h
 	}
 
+	contentEnd := y
+
 	// Buttons: right-aligned in one row (the card was sized for that); they
 	// only wrap if the screen is too narrow. The first button ends up left-most.
 	c.buttons = make([]rect, len(c.spec.Buttons))
@@ -185,6 +199,33 @@ func (c *card) layout() {
 		y -= gap
 	}
 	c.h = y + pad
+
+	// Taller than the screen: keep the header and buttons, scroll the rest.
+	c.view, c.scrollMax = rect{}, 0
+	if maxH := wa.Bottom - wa.Top - 2*m.s(16); maxH > c.header+m.s(120) && c.h > maxH {
+		over := c.h - maxH
+		c.h = maxH
+		bottom := c.h - pad
+		for i := range c.buttons {
+			c.buttons[i].Top -= over
+			c.buttons[i].Bottom -= over
+			bottom = min(bottom, c.buttons[i].Top-m.s(12))
+		}
+		c.view = rect{Left: 0, Top: c.header, Right: c.w, Bottom: bottom}
+		c.scrollMax = max(contentEnd+m.s(10)-bottom, 0)
+	}
+	c.scroll = min(max(c.scroll, 0), c.scrollMax)
+}
+
+// scrollBy scrolls the middle of a tall card (mouse wheel).
+func (c *card) scrollBy(delta int32) {
+	if c.scrollMax == 0 {
+		return
+	}
+	if s := min(max(c.scroll+delta, 0), c.scrollMax); s != c.scroll {
+		c.scroll = s
+		call(pInvalidateRect, c.hwnd, 0, 0)
+	}
 }
 
 func buttonLabel(b Button) string {
@@ -250,18 +291,29 @@ func (c *card) paint(target uintptr) {
 		drawText(dc, "i", &icon, dtCenter|dtVCenter|dtSingleLine|dtNoPrefix)
 	}
 
+	// The middle part (logo, title, text, items, footer); it scrolls on tall cards.
+	off := func(r rect) rect { r.Top -= c.scroll; r.Bottom -= c.scroll; return r }
+	if c.scrollMax > 0 {
+		call(pSaveDC, dc)
+		call(pIntersectClipRect, dc, uintptr(c.view.Left), uintptr(c.view.Top), uintptr(c.view.Right), uintptr(c.view.Bottom))
+	}
+	if len(c.logoPx) > 0 {
+		r := off(c.logo)
+		drawPixels(dc, c.logoPx, r.Left, r.Top, r.Right-r.Left, r.Bottom-r.Top)
+	}
 	call(pSelectObject, dc, m.fonts.title)
 	call(pSetTextColor, dc, colorTitle)
-	t := c.title
+	t := off(c.title)
 	drawText(dc, c.spec.Title, &t, dtWordBreak|dtNoPrefix)
 	if c.spec.Body != "" {
 		call(pSelectObject, dc, m.fonts.body)
 		call(pSetTextColor, dc, colorBody)
-		b := c.body
+		b := off(c.body)
 		drawText(dc, c.spec.Body, &b, dtWordBreak|dtEditControl|dtNoPrefix)
 	}
 	for i, it := range c.spec.Items {
 		r := c.items[i]
+		r.title, r.path, r.note = off(r.title), off(r.path), off(r.note)
 		call(pSelectObject, dc, m.fonts.button)
 		call(pSetTextColor, dc, colorTitle)
 		drawText(dc, it.Title, &r.title, dtWordBreak|dtEditControl|dtNoPrefix)
@@ -279,8 +331,18 @@ func (c *card) paint(target uintptr) {
 	if c.spec.Footer != "" {
 		call(pSelectObject, dc, m.fonts.body)
 		call(pSetTextColor, dc, colorBody)
-		f := c.footer
+		f := off(c.footer)
 		drawText(dc, c.spec.Footer, &f, dtWordBreak|dtEditControl|dtNoPrefix)
+	}
+	if c.scrollMax > 0 {
+		call(pRestoreDC, dc, ^uintptr(0)) // -1: the state saved above
+		// A slim scroll bar on the right and a line above the buttons.
+		v := c.view
+		track := v.Bottom - v.Top - m.s(8)
+		thumb := max(track*track/(track+c.scrollMax), m.s(24))
+		top := v.Top + m.s(4) + (track-thumb)*c.scroll/c.scrollMax
+		roundRect(dc, rect{Left: v.Right - m.s(7), Top: top, Right: v.Right - m.s(3), Bottom: top + thumb}, m.s(4), colorBorder, colorBorder)
+		fill(dc, rect{Left: 0, Top: v.Bottom, Right: c.w, Bottom: v.Bottom + 1}, colorSecondHv)
 	}
 
 	call(pSelectObject, dc, m.fonts.button)

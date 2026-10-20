@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/popup"
 	"github.com/denismcapple/OneDriveHelper/internal/remediate"
@@ -171,7 +172,7 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 		title = fmt.Sprintf("%d problems need attention", n)
 	}
 	spec := popup.Spec{
-		ID: idStatus, Severity: s.severity(), Brand: c.Title(), Accent: c.AccentColor,
+		ID: idStatus, Severity: s.severity(), Brand: c.Title(), Logo: c.LogoPath(), Accent: c.AccentColor,
 		Title: title, Body: b.String(), Items: items, Footer: footer, OnHelp: func() { a.Explain(topicStatus) },
 	}
 	// "Ignore" applies to the alerts for the problems shown here.
@@ -383,10 +384,10 @@ func (a *Agent) copyDetails() {
 	cfg := config.Load()
 	s := a.collect(cfg)
 	if err := a.ui.CopyText(Report(cfg, s, LogPath())); err != nil {
-		winapi.Error(cfg.Title(), "Could not copy the details: "+err.Error())
+		dialog.Error("The details could not be copied", "Could not copy the details: "+err.Error())
 		return
 	}
-	winapi.Info(cfg.Title(), "The details have been copied.\n\nPaste them (Ctrl+V) into your e-mail or support ticket.")
+	dialog.Success("Details copied", "Paste them (Ctrl+V) into your e-mail or support ticket.")
 }
 
 func (a *Agent) explain(topic string) {
@@ -394,5 +395,5 @@ func (a *Agent) explain(topic string) {
 	a.mu.Lock()
 	orphans := a.last.Orphans
 	a.mu.Unlock()
-	winapi.Info(explainTitle, Explain(cfg, topic, orphans))
+	dialog.Info(explainTitle, Explain(cfg, topic, orphans))
 }

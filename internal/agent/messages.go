@@ -90,7 +90,7 @@ func notRunningSpec(c config.Config, a Actions, autoFailed bool) popup.Spec {
 		body = defaultAutoRestartFailed
 	}
 	s := popup.Spec{
-		ID: idNotRunning, Severity: popup.Warning, Brand: c.Title(), Sound: c.PopupSound, Accent: c.AccentColor,
+		ID: idNotRunning, Severity: popup.Warning, Brand: c.Title(), Logo: c.LogoPath(), Sound: c.PopupSound, Accent: c.AccentColor,
 		Title:  "OneDrive is not running",
 		Body:   or(c.NotRunningMessage, body),
 		OnHelp: func() { a.Explain(topicNotRunning) },
@@ -135,7 +135,7 @@ func orphanSpec(c config.Config, orphans []onedrive.Orphan, a Actions) popup.Spe
 		footer = more + "\n\n" + footer
 	}
 	s := popup.Spec{
-		ID: idOrphans, Severity: popup.Critical, Brand: c.Title(), Sound: c.PopupSound, Accent: c.AccentColor,
+		ID: idOrphans, Severity: popup.Critical, Brand: c.Title(), Logo: c.LogoPath(), Sound: c.PopupSound, Accent: c.AccentColor,
 		Title: title, Body: or(c.OrphanMessage, defaultOrphan), Items: items, Footer: footer,
 		OnHelp: func() { a.Explain(topicOrphans) },
 	}
@@ -151,7 +151,7 @@ func orphanSpec(c config.Config, orphans []onedrive.Orphan, a Actions) popup.Spe
 
 func fixingSpec(c config.Config) popup.Spec {
 	return popup.Spec{
-		ID: idFixing, Severity: popup.Info, Brand: c.Title(), Accent: c.AccentColor,
+		ID: idFixing, Severity: popup.Info, Brand: c.Title(), Logo: c.LogoPath(), Accent: c.AccentColor,
 		Title: "Fixing your library folders…",
 		Body: "The folders have been moved to a safe place while a copy of your files is saved. " +
 			"Please save new work somewhere else until this finishes.",

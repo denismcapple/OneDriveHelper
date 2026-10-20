@@ -30,7 +30,7 @@ const (
 
 // Config holds all settings. Tags: reg = registry/JSON name, def = default,
 // label/help = shown in the config tool, min/max = allowed range for numbers,
-// kind=multiline = multi-line text.
+// kind=multiline = multi-line text, kind=image = a PNG file (see logo.go).
 type Config struct {
 	// Branding & support
 	CompanyName        string `reg:"CompanyName" def:"" label:"Company name" help:"Shown in the title of every popup and dialog, e.g. 'Contoso'."`
@@ -40,6 +40,7 @@ type Config struct {
 	SupportURL         string `reg:"SupportURL" def:"" label:"Support web page" help:"Opened by 'Contact support' (https://, http:// or mailto:)."`
 	SupportEmailMethod string `reg:"SupportEmailMethod" def:"auto" label:"How to start support e-mails" help:"auto = open a draft with the full report (small monospace text) in the user's mail program, or a simple mailto: link with the report on the clipboard if there is no desktop mail program. draft / link force one of these."`
 	AccentColor        string `reg:"AccentColor" def:"#0F6CBD" label:"Accent colour" help:"Colour of the main buttons, as #RRGGBB."`
+	LogoFile           string `reg:"LogoFile" def:"" kind:"image" label:"Company logo" help:"PNG image shown at the top of every popup; 250 x 75 pixels works well (at most 2000 x 1000 pixels and 2 MB). Each PC keeps it as %ProgramData%\\OneDriveHelper\\logo.png; Export saves it as logo.png next to the settings file."`
 
 	// Alert text (blank = built-in wording)
 	NotRunningMessage string `reg:"NotRunningMessage" def:"" label:"'OneDrive not running' text" kind:"multiline" help:"Replaces the body of the 'OneDrive is not running' popup."`
@@ -55,6 +56,7 @@ type Config struct {
 	// Library sync check
 	OrphanCheckEnabled bool   `reg:"OrphanCheckEnabled" def:"1" label:"Alert when a library stops syncing" help:"Alert when a library folder exists on disk but is no longer synced."`
 	RemediationEnabled bool   `reg:"RemediationEnabled" def:"1" label:"Offer 'Fix (admin)'" help:"Offer the admin-approved fix for libraries that stopped syncing."`
+	RestartToFinish    bool   `reg:"RestartToFinish" def:"1" label:"Offer a restart or sign-out to finish a fix" help:"When files in a folder are in use and can't be released, offer the user a restart (single-user workstations) or a sign-out (Remote Desktop / Azure Virtual Desktop / Citrix / VMware Horizon / FSLogix, or with someone else signed in). The fix finishes by itself at their next sign-in, on any computer or session host they use (within 3 days, no second approval)."`
 	BackupRoot         string `reg:"BackupRoot" def:"{Profile}\\ODHelper\\Saved" label:"Save files to" help:"Where the fix saves files; {Profile} = the user's profile folder. Each run creates <this>\\<date-time>\\<Library>."`
 	FreeSpaceMarginMB  int    `reg:"FreeSpaceMarginMB" def:"1024" min:"0" max:"1048576" label:"Extra free space required (MB)" help:"Free space required on top of the data being saved."`
 
@@ -237,6 +239,11 @@ func (c Config) Validate() error {
 	}
 	if b := c.BackupDir(`C:\Users\user`); strings.TrimSpace(c.BackupRoot) == "" || !filepath.IsAbs(b) || len(b) <= 3 {
 		errs = append(errs, fmt.Errorf("BackupRoot must be an absolute folder (or start with {Profile}), got %q", c.BackupRoot))
+	}
+	if c.LogoFile != "" {
+		if _, _, err := CheckLogo(c.LogoPath()); err != nil {
+			errs = append(errs, fmt.Errorf("LogoFile %s: %w", c.LogoPath(), err))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -492,9 +499,14 @@ func RemoveObsolete() []string {
 	return removed
 }
 
-// Save validates c and writes every setting to HKLM\SOFTWARE\OneDriveHelper (requires admin).
+// Save validates c and writes every setting to HKLM\SOFTWARE\OneDriveHelper
+// (requires admin). A logo is copied to %ProgramData%\OneDriveHelper\logo.png
+// and stored as "logo.png"; no logo removes that file.
 func Save(c Config) error {
 	if err := c.Validate(); err != nil {
+		return err
+	}
+	if err := installLogo(&c); err != nil {
 		return err
 	}
 	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, KeyPath, registry.ALL_ACCESS)
@@ -542,11 +554,25 @@ func ParseFile(path string, base Config) (Config, []string, error) {
 	for name := range raw {
 		present = append(present, name)
 	}
+	// A logo named in the file is relative to the file's folder (logo.png next to it).
+	if _, ok := raw["LogoFile"]; ok && c.LogoFile != "" && !filepath.IsAbs(c.LogoFile) {
+		if abs, err := filepath.Abs(path); err == nil {
+			c.LogoFile = filepath.Join(filepath.Dir(abs), c.LogoFile)
+		}
+	}
 	return c, present, nil
 }
 
-// WriteFile writes c as indented JSON.
+// WriteFile writes c as indented JSON. A logo is copied next to it as
+// logo.png and referred to by that name.
 func WriteFile(c Config, path string) error {
+	if c.LogoFile != "" {
+		dst := filepath.Join(filepath.Dir(path), LogoName)
+		if err := copyLogo(c.LogoPath(), dst); err != nil {
+			return fmt.Errorf("logo: %w", err)
+		}
+		c.LogoFile = LogoName
+	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err

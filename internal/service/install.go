@@ -233,6 +233,7 @@ func Uninstall(purge bool, logf func(string, ...any)) error {
 	_ = elog.Remove()
 	if purge {
 		_ = deleteTree(registry.LOCAL_MACHINE, config.KeyPath)
+		_ = os.Remove(config.InstalledLogo())
 		logf("Configuration removed")
 	}
 	logf("Program files left in %s (delete once agents have exited)", InstallDir())
