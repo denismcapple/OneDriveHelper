@@ -120,7 +120,7 @@ func Install(configFile string, logf func(string, ...any)) error {
 		{Type: mgr.ServiceRestart, Delay: 60 * time.Second},
 	}, 86400)
 
-	if err := elog.Install(); err != nil {
+	if err := elog.Install(svcExe); err != nil {
 		logf("Warning: event log source: %v", err)
 	}
 	if err := logx.PrepareProgramDataDir(); err != nil {

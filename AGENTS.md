@@ -8,7 +8,8 @@ Go 1.27+ on PATH (for example `C:\Program Files\Go\bin`; in PowerShell `$env:Pat
 
 - Format: `gofmt -w .`
 - Vet: `go vet ./...`
-- Test: `go test ./...`
+- Test: `go test ./...` (`-short` skips the test that builds the service exe for both architectures)
+- Regenerate the event message table: `go generate ./cmd/OneDriveHelper`
 - Full build (vet + test + amd64/arm64 into `dist\`): `.\build.ps1 -Version x.y.z` (PowerShell)
 - Release (build + `release\OneDriveHelper-vX.Y.Z-x64.zip`, `-arm64.zip`, `SHA256SUMS.txt`): `.\release.ps1 -Version x.y.z`
 - CI: `.github/workflows/test.yml` (gofmt, vet, test, arm64 build) on every push and pull request.
@@ -31,4 +32,5 @@ Go 1.27+ on PATH (for example `C:\Program Files\Go\bin`; in PowerShell `$env:Pat
 - Wrap every button, menu and tray action in `Agent.safe` (logs the panic with its stack); goroutines started by `internal/popup` use `safeRun`. A panic in the fix runs recovery straight away.
 - Elevation for the fix and the settings tool goes through `winapi.RunElevatedWithDeadline` (15 minutes); the elevated side gets `--deadline` and refuses to act after it.
 - Upgrades stage `*.new`, swap with unique `*.old-<timestamp>` names and roll back on any failure (`internal/service/upgrade.go`).
+- Event IDs live only in the `// Event IDs.` const block in `internal/elog/elog.go`. After adding one, run `go generate ./cmd/OneDriveHelper` (writes `cmd/OneDriveHelper/eventmsgs_windows_{amd64,arm64}.syso`, the message table the event source points at; commit them). `tools/eventmsgs` tests fail if they're stale. The installer re-registers the source on every install (`elog.Install(svcExe)`), never `InstallAsEventCreate`.
 - `onedrive.Gather` records sources it could not read in `Inputs.ReadErrors`; with any read error, `IsActive` is true for every path. A missing key is empty, not an error.

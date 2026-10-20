@@ -1,5 +1,8 @@
 // OneDriveHelper.exe is the LocalSystem service and the admin command line.
+// It also carries the event source's message table (eventmsgs_windows_*.syso).
 package main
+
+//go:generate go run ../../tools/eventmsgs
 
 import (
 	"flag"

@@ -2,8 +2,10 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.8.1** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.8.2** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
+> **New in 0.8.2: clean event log entries.** Event Viewer no longer puts "The description for Event ID ... cannot be found" above every OneDrive Helper event; the event text is now built into the tool. Upgrading fixes events already in the log too. Event IDs are unchanged, so RMM monitors keep working. See [Getting alerts in your RMM](#getting-alerts-in-your-rmm).
+>
 > **New in 0.8.1: no more false alarms on new PCs.** Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are no longer reported. A freshly set-up PC signed in to a work account always has an empty, unused `OneDrive` folder, which 0.7.0 and 0.8.0 wrongly flagged as "stopped syncing". The alert's heading now also says "OneDrive folder" rather than "SharePoint library" when the list includes a leftover organisation folder.
 >
 > **New in 0.8.0: a much safer fix.** The folder fix is the only part of the tool that deletes anything, so it now moves each folder out of the way before saving it, deletes only files it has proven it saved, puts everything back if anything is in doubt, and recovers by itself if it's interrupted. Upgrades wait for a fix in progress, and roll back if they fail. The details are in [How the fix works](#how-the-fix-works).
@@ -73,7 +75,7 @@ Each alert can be ignored for a while (5 minutes, 30 minutes, until the next res
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.8.1 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.8.2 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -270,15 +272,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.8.1; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.8.2; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.8.1'
+$Version = 'v0.8.2'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = '85E73B5A20635838973D2FD4A0856AC7C726D5B0918CBA615A58F1FB7BB9434A'
-    'arm64' = 'C986C87CD0293BA19BE80047760617DF2AFDA5DA2819E410B8492A9E1FE27B36'
+    'x64'   = 'DD79E1A9B59EDE1A1C31B348EBDEE1289AC2625C2848F9CA4811BEF99F2710E6'
+    'arm64' = '104B66288E54DD20918FAF0B4E4BB2308EE91DE7A1A4192125417AC48C73BDE2'
 }
 $Settings = @'
 {
@@ -398,6 +400,10 @@ And for information, if you want the full picture:
 | 3007 | Warning | The list of running programs couldn't be read 5 checks in a row, so OneDrive Helper can't tell whether OneDrive is running (no restart or alert happens while it can't tell) |
 
 A fix where folders were only skipped, kept or left alone logs those per-folder events, not 5003.
+
+3001 is logged as soon as OneDrive has been missing past the grace period, before the automatic restarts are tried, so it also appears when a restart then works (followed by 3005). To be alerted only when a user is actually left without OneDrive, monitor 3006.
+
+The event text is built into `OneDriveHelper.exe`, which the installer registers as the source's message file. Versions up to 0.8.1 used Windows' `EventCreate.exe` for this, so Event Viewer put "The description for Event ID ... cannot be found" above every message. Installing 0.8.2 or later fixes that for old events too. The event IDs didn't change.
 
 ## Building from source
 

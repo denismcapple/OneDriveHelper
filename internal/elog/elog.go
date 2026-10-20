@@ -3,8 +3,9 @@
 package elog
 
 import (
-	"strings"
+	"errors"
 
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc/eventlog"
 
 	"github.com/denismcapple/OneDriveHelper/internal/version"
@@ -94,13 +95,32 @@ func (e *Log) Close() {
 	}
 }
 
-// Install registers the event source (requires admin).
-func Install() error {
-	err := eventlog.InstallAsEventCreate(version.EventSource, eventlog.Error|eventlog.Warning|eventlog.Info)
-	if err != nil && strings.Contains(err.Error(), "exists") {
-		return nil
+const sourceKey = `SYSTEM\CurrentControlSet\Services\EventLog\Application\` + version.EventSource
+
+// Install registers the event source (requires admin) with msgFile, the
+// installed OneDriveHelper.exe, as its message file: it carries a "%1" entry
+// for every event ID. Sources registered by versions up to 0.8.1 pointed at
+// EventCreate.exe, which only knows IDs 1-1000, so Event Viewer showed "The
+// description for Event ID ... cannot be found"; they are re-pointed here.
+func Install(msgFile string) error { return install(registry.LOCAL_MACHINE, sourceKey, msgFile) }
+
+func install(root registry.Key, path, msgFile string) error {
+	k, _, err := registry.CreateKey(root, path, registry.SET_VALUE)
+	if err != nil {
+		return err
 	}
-	return err
+	defer k.Close()
+	if err := k.SetExpandStringValue("EventMessageFile", msgFile); err != nil {
+		return err
+	}
+	if err := k.SetDWordValue("TypesSupported", eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
+		return err
+	}
+	// CustomSource marks a source that eventcreate.exe may write to.
+	if err := k.DeleteValue("CustomSource"); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func Remove() error { return eventlog.Remove(version.EventSource) }
