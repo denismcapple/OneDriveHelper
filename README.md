@@ -2,9 +2,11 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.10.0** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.10.1** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> **Latest update (0.10.0): it tells old copies apart from libraries that have really stopped.** When an organisation is renamed or an account is added again, OneDrive starts syncing the same libraries into a new folder and leaves the old ones behind. The tool now checks what OneDrive is actually syncing, and groups the folders it finds: **stopped syncing**, **old copies** (the same library now syncs to a new folder), **from an account that is no longer connected**, and **empty leftover folders**. Old copies and folders from disconnected accounts are still saved and removed by the fix, but never synced again. The alert is clearer too: the warning comes first and the folder list is smaller. Tested on Remote Desktop (RDS) session hosts, including finishing a fix on a different host. See [How broken folders are spotted](#how-broken-folders-are-spotted).
+> **Latest update (0.10.1): old copies are now recognised even when the tool was installed after the rename**, by matching the folder name with the libraries OneDrive knows about. In 0.10.0 those showed as "Stopped syncing".
+>
+> **0.10.0: it tells old copies apart from libraries that have really stopped.** When an organisation is renamed or an account is added again, OneDrive starts syncing the same libraries into a new folder and leaves the old ones behind. The tool now checks what OneDrive is actually syncing, and groups the folders it finds: **stopped syncing**, **old copies** (the same library now syncs to a new folder), **from an account that is no longer connected**, and **empty leftover folders**. Old copies and folders from disconnected accounts are still saved and removed by the fix, but never synced again. The alert is clearer too: the warning comes first and the folder list is smaller. Tested on Remote Desktop (RDS) session hosts, including finishing a fix on a different host. See [How broken folders are spotted](#how-broken-folders-are-spotted).
 
 <p align="center">
   <img src="docs/images/status-problems.png" width="716" alt="OneDrive Helper status window listing folders that have stopped syncing">
@@ -82,7 +84,7 @@ Questions and messages (the fix confirmation and its result, the administrator a
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.0 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.1 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -305,15 +307,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.1; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.10.0'
+$Version = 'v0.10.1'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = 'E4B937CA42C290F2E110BC9BCD3494367DFDC5205E6112A818025BA23D4759DF'
-    'arm64' = '9D24EF8067D510EED14259DCC3EDF5FE6DED74CF0128192A6A229129B1EBFDC9'
+    'x64'   = 'A512F89B8E15D56DCD555C71D1217B9AC0CF8543B67A17E998E58532262904A9'
+    'arm64' = 'FC22D2A0FEDB11B7FCA6E1C9A7976B4ABD1099590FC3F9A47AA159158FAD8941'
 }
 $Settings = @'
 {
@@ -517,6 +519,7 @@ Each folder found is then sorted by what became of its library. The tool works o
 * **Old copy**: the same library (same site and list IDs, or the same SharePoint address) syncs to another folder that OneDrive is actively syncing. A list ID alone isn't enough, because every site's default library can share one.
 * **Stopped syncing**: the library isn't synced anywhere, but a signed-in account belongs to the same organisation (same tenant ID or SharePoint address).
 * **From an account that is no longer connected**: no signed-in account belongs to its organisation.
+* If nothing records which library was in the folder (common when the tool was installed after the rename), the folder name is used: OneDrive names library folders "*site* - *library*", and its current settings and leftover `ClientPolicy` files carry both names. This is only used when exactly one library has that name.
 * If the library can't be identified at all, it's shown as stopped syncing, as before.
 
 This only changes the wording and whether the library is synced again after a fix. It never changes which folders count as broken, or the safety checks.

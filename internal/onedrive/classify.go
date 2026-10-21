@@ -78,7 +78,43 @@ func (in Inputs) identify(c string) identity {
 			}
 		}
 	}
+	if id.empty() && len(id.keys) == 0 && len(id.namespaces) == 0 {
+		for _, l := range in.byFolderName(c) {
+			add(l)
+		}
+	}
 	return id
+}
+
+// byFolderName is the last resort when nothing records which library was at
+// c: OneDrive names library folders "<site title> - <library title>", and
+// its current settings and leftover ClientPolicy files carry both titles.
+// It returns nothing unless exactly one library has that name.
+func (in Inputs) byFolderName(c string) []Library {
+	name := c[strings.LastIndex(c, `\`)+1:] // c is Clean (lower case)
+	var found []Library
+	ids := map[string]bool{}
+	for _, libs := range [][]Library{in.Current, in.Policies} {
+		for _, l := range libs {
+			if l.SiteTitle == "" || l.ListTitle == "" || Clean(l.MountPoint) == c ||
+				strings.ToLower(l.SiteTitle+" - "+l.ListTitle) != name {
+				continue
+			}
+			key := libKey(l)
+			if key == "" {
+				key = strings.ToLower(strings.TrimRight(l.URLNamespace, "/"))
+			}
+			if key == "" {
+				continue
+			}
+			ids[key] = true
+			found = append(found, l)
+		}
+	}
+	if len(ids) != 1 {
+		return nil // unknown, or ambiguous (e.g. same site and library name in two organisations)
+	}
+	return found
 }
 
 // classify says what became of the library that was at c (Clean), given the

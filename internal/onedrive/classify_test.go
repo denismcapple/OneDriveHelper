@@ -90,6 +90,66 @@ func TestClassifyRenamedOrganisation(t *testing.T) {
 	}
 }
 
+// Casey's PC: OneDrive Helper was installed after the rename, and OneDrive
+// keeps no entries for the old paths, so only the folder names link the old
+// folders to libraries: its current settings (Internal) and leftover
+// ClientPolicy files (External, EIT Senior Management Team). Nothing at all
+// is known about EIT Directors.
+func TestClassifyByFolderName(t *testing.T) {
+	const tenant = "956a401c-dc69-43fe-9af8-b4c3f4d898c1"
+	profile := `C:\Users\casey`
+	oldOrg, newOrg := filepath.Join(profile, "EVERYTHING COMPUTER SYSTEMS LIMITED"), filepath.Join(profile, "Everything IT")
+	pol := func(site, list, siteID, ns string) Library {
+		return Library{SiteTitle: site, ListTitle: list, SiteID: siteID, WebID: siteID, ListID: "846c226d9e36484a98cdd4cd359a3c3e", URLNamespace: ns, Account: "Business1"}
+	}
+	smt := pol("EIT Senior Management Team", "Documents", "11111111111111111111111111111111", "https://eitcomputers.sharepoint.com/sites/EIT-SMT/Shared Documents/")
+	internal := pol("Internal", "Documents", "22222222222222222222222222222222", "https://eitcomputers.sharepoint.com/sites/internal/Shared Documents/")
+	external := pol("External", "Documents", "33333333333333333333333333333333", "https://eitcomputers.sharepoint.com/sites/external/Shared Documents/")
+	newSMT, newInt, newExt := filepath.Join(newOrg, "EIT Senior Management Team - Documents"), filepath.Join(newOrg, "Internal - Documents"), filepath.Join(newOrg, "External - Documents")
+	in := Inputs{
+		ProfileDir: profile,
+		Accounts: []Account{{Key: "Business1", UserFolder: filepath.Join(profile, "OneDrive - Everything IT"), TenantID: tenant,
+			SyncedFolders: []string{newSMT, newInt, newExt}}},
+		// Internal is in OneDrive's current settings (same site + list IDs as its policy file).
+		Current: []Library{{SiteTitle: "Internal", ListTitle: "Documents", SiteID: internal.SiteID, ListID: internal.ListID, TenantID: tenant,
+			WebURL: "https://eitcomputers.sharepoint.com/sites/internal", MountPoint: newInt}},
+		// External and SMT: only the live provider entries for the NEW folders.
+		Providers: []Provider{
+			{MountPoint: newExt, LibraryType: "teamsite", URLNamespace: external.URLNamespace},
+			{MountPoint: newSMT, LibraryType: "teamsite", URLNamespace: smt.URLNamespace},
+		},
+		Policies: []Library{smt, internal, external},
+	}
+	active := cleanAll([]string{newSMT, newInt, newExt})
+	for name, want := range map[string]struct {
+		kind  Kind
+		moved string
+	}{
+		"Internal - Documents":                   {KindMoved, newInt},
+		"External - Documents":                   {KindMoved, newExt},
+		"EIT Senior Management Team - Documents": {KindMoved, newSMT},
+		"EIT Directors - Documents":              {KindUnknown, ""},
+	} {
+		if k, moved := in.classify(Clean(filepath.Join(oldOrg, name)), active); k != want.kind || moved != want.moved {
+			t.Errorf("%s: kind %d moved to %q, want %d %q", name, k, moved, want.kind, want.moved)
+		}
+	}
+
+	// A library with that name that isn't synced anywhere now: stopped, and its
+	// SharePoint host shows the organisation is still signed in.
+	in.Providers = in.Providers[1:] // External no longer synced
+	in.Accounts[0].SyncedFolders = []string{newSMT, newInt}
+	if k, moved := in.classify(Clean(filepath.Join(oldOrg, "External - Documents")), cleanAll([]string{newSMT, newInt})); k != KindStopped || moved != "" {
+		t.Errorf("External, not synced anywhere: kind %d moved to %q", k, moved)
+	}
+
+	// Two different libraries with the same name (e.g. in two organisations): don't guess.
+	in.Policies = append(in.Policies, pol("Internal", "Documents", "44444444444444444444444444444444", "https://fabrikam.sharepoint.com/sites/internal/Shared Documents/"))
+	if k, moved := in.classify(Clean(filepath.Join(oldOrg, "Internal - Documents")), active); k != KindUnknown || moved != "" {
+		t.Errorf("ambiguous name: kind %d moved to %q", k, moved)
+	}
+}
+
 func TestClassifyConnectedBySharePointHost(t *testing.T) {
 	active := []string{Clean(`C:\Users\d\Contoso\Live - Documents`), Clean(`C:\Users\d\OneDrive - Contoso`)}
 	in := Inputs{
