@@ -25,6 +25,36 @@ type Orphan struct {
 	// KnownFolders lists Windows folders (Desktop, Documents, ...) that are
 	// redirected into this folder. Such folders are never removed automatically.
 	KnownFolders []string
+	// Kind says what became of the library (see classify). It only changes
+	// the wording and whether the library is synced again after a fix, never
+	// whether the folder counts as orphaned.
+	Kind Kind
+	// MovedTo is the folder the same library now syncs to (KindMoved only).
+	MovedTo string
+}
+
+// Kind is what became of an orphaned folder's library.
+type Kind int
+
+const (
+	// KindUnknown: it can't be told which library this was. Shown and fixed
+	// like KindStopped.
+	KindUnknown Kind = iota
+	// KindStopped: the library isn't synced anywhere, but its organisation is
+	// still signed in to OneDrive.
+	KindStopped
+	// KindMoved: the same library now syncs to another folder (MovedTo), so
+	// this folder is an old copy. It is not synced again after a fix.
+	KindMoved
+	// KindDisconnected: no signed-in OneDrive account covers the library's
+	// organisation. It is not synced again after a fix.
+	KindDisconnected
+)
+
+// NeedsResync reports whether the library should be synced again after its
+// folder has been fixed.
+func (o Orphan) NeedsResync() bool {
+	return !o.EmptyOrg && o.Kind != KindMoved && o.Kind != KindDisconnected
 }
 
 // Org is the organisation folder name, e.g. "Contoso".
@@ -52,6 +82,9 @@ type Inputs struct {
 	SyncRoots  []string
 	Known      []Library
 	Policies   []Library // re-sync IDs recovered from ClientPolicy_*.ini (matched by URL)
+	// Current are the libraries in OneDrive's own settings (libraryScope
+	// lines). Only used to classify orphans, never to decide what is active.
+	Current []Library
 	// ShellFolders are the user's Desktop/Documents/... locations.
 	ShellFolders map[string]string // name -> path
 	// ReadErrors lists sources that exist but could not be read. When it is
@@ -144,7 +177,9 @@ func Gather(h Hive, profileDir string) Inputs {
 		Known:      loadLibraries(h, r),
 	}
 	if profileDir != "" {
-		in.Policies = ReadClientPolicies(filepath.Join(profileDir, "AppData", "Local"), accts)
+		local := filepath.Join(profileDir, "AppData", "Local")
+		in.Policies = ReadClientPolicies(local, accts)
+		in.Current = ReadLibraries(local, accts)
 	}
 	in.ShellFolders = shellFolders(h, profileDir, r)
 	in.ReadErrors = r.list
@@ -289,6 +324,9 @@ func FindOrphans(in Inputs, fs FS) []Orphan {
 	}
 	for i := range out {
 		out[i].KnownFolders = in.knownFoldersIn(out[i].Path)
+		if !out[i].EmptyOrg {
+			out[i].Kind, out[i].MovedTo = in.classify(Clean(out[i].Path), active)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return Clean(out[i].Path) < Clean(out[j].Path) })
 	return out

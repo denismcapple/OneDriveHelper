@@ -215,6 +215,10 @@ func (p *Plan) Summary() string {
 		switch {
 		case it.Orphan.EmptyOrg:
 			b.WriteString("    Empty leftover organisation folder; it will just be removed.\n")
+		case it.Orphan.Kind == onedrive.KindMoved:
+			fmt.Fprintf(&b, "    Old copy: the library now syncs to %s; it will not be re-synced.\n", it.Orphan.MovedTo)
+		case it.Orphan.Kind == onedrive.KindDisconnected:
+			b.WriteString("    From an account that is no longer connected; it will not be re-synced.\n")
 		case it.Orphan.CanResync():
 			b.WriteString("    Will be re-synced automatically afterwards.\n")
 		case it.Orphan.WebURL != "":

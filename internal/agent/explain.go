@@ -43,11 +43,22 @@ func Explain(c config.Config, topic string, orphans []onedrive.Orphan) string {
 			"If this message keeps coming back: " + c.SupportContact()
 	case topicOrphans:
 		var list strings.Builder
+		moved, gone := false, false
 		for _, o := range orphans {
 			list.WriteString("•  " + o.DisplayName() + "\n")
+			moved = moved || (!o.EmptyOrg && o.Kind == onedrive.KindMoved)
+			gone = gone || (!o.EmptyOrg && o.Kind == onedrive.KindDisconnected)
 		}
 		if list.Len() > 0 {
 			list.WriteString("\n")
+		}
+		if moved {
+			list.WriteString("Some of them are old copies: the same shared folder now syncs to a new folder on this computer, " +
+				"usually after your organisation was renamed or your account was added again. " +
+				"Anything saved in an old copy since then never reached the cloud.\n\n")
+		}
+		if gone {
+			list.WriteString("Some of them come from an account that is no longer connected to OneDrive on this computer.\n\n")
 		}
 		return "WHAT HAS HAPPENED?\n" +
 			"Some folders on this computer used to be linked to shared company folders (in SharePoint or Teams). " +

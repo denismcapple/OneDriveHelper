@@ -245,15 +245,19 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		return
 	}
 	var list strings.Builder
-	manual := false
+	resync, manual := false, false
 	for _, it := range plan.Items {
 		list.WriteString("• " + it.Orphan.DisplayName() + "\n    " + ResyncNote(it.Orphan) + "\n")
-		manual = manual || (!it.Orphan.CanResync() && !it.Orphan.EmptyOrg)
+		resync = resync || it.Orphan.NeedsResync()
+		manual = manual || (it.Orphan.NeedsResync() && !it.Orphan.CanResync())
 	}
-	step3 := "  3. Ask OneDrive to sync the libraries again\n"
-	if manual {
+	step3 := ""
+	switch {
+	case manual:
 		step3 = "  3. Ask OneDrive to sync the libraries again. Where that can't be done automatically\n" +
 			"      (see above), you will need to click 'Sync' on the library's web page.\n"
+	case resync:
+		step3 = "  3. Ask OneDrive to sync the libraries again\n"
 	}
 	if !flow.confirm("Fix these folders?", "These folders are no longer syncing with OneDrive:\n\n"+list.String()+
 		"\nThe fix will:\n  1. Save a copy of the files stored on this PC to "+plan.BackupDir+"\n"+
@@ -373,6 +377,10 @@ func ResyncNote(o onedrive.Orphan) string {
 		return "Contains your " + strings.Join(o.KnownFolders, "/") + " folder, so it can only be fixed by your support team."
 	case o.EmptyOrg:
 		return "Empty leftover folder - it will simply be removed."
+	case o.Kind == onedrive.KindMoved:
+		return "Old copy: this library now syncs to " + o.MovedTo + ". Your files here are saved, then this folder is removed."
+	case o.Kind == onedrive.KindDisconnected:
+		return "From an account that is no longer connected. Your files are saved, then the folder is removed (it isn't synced again)."
 	case o.CanResync():
 		return "Will be synced again automatically."
 	case o.WebURL != "":
@@ -389,7 +397,7 @@ func Resync(orphans []onedrive.Orphan, lg *log.Logger) {
 	defer ev.Close()
 	var auto, manual, none []string
 	for _, o := range orphans {
-		if o.EmptyOrg || exists(o.Path) {
+		if !o.NeedsResync() || exists(o.Path) {
 			continue
 		}
 		switch {

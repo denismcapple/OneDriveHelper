@@ -2,9 +2,9 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.9.2** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.10.0** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> **Latest update (0.9.2): tested on Remote Desktop (RDS).** The fix, including signing out to finish it and picking it up again on a different session host, has now been tested on RDS session hosts. The tray icon now turns green as soon as a fix is done, rather than up to a minute later, and the progress message no longer says the folders "have been moved" before they are.
+> **Latest update (0.10.0): it tells old copies apart from libraries that have really stopped.** When an organisation is renamed or an account is added again, OneDrive starts syncing the same libraries into a new folder and leaves the old ones behind. The tool now checks what OneDrive is actually syncing, and groups the folders it finds: **stopped syncing**, **old copies** (the same library now syncs to a new folder), **from an account that is no longer connected**, and **empty leftover folders**. Old copies and folders from disconnected accounts are still saved and removed by the fix, but never synced again. The alert is clearer too: the warning comes first and the folder list is smaller. Tested on Remote Desktop (RDS) session hosts, including finishing a fix on a different host. See [How broken folders are spotted](#how-broken-folders-are-spotted).
 
 <p align="center">
   <img src="docs/images/status-problems.png" width="716" alt="OneDrive Helper status window listing folders that have stopped syncing">
@@ -25,12 +25,14 @@ We got tired of finding out about these the hard way, so we wrote something that
 * **Watches OneDrive for every signed-in user, and restarts it when it stops.** If OneDrive isn't running for a couple of minutes (and isn't in the middle of an update), it's quietly restarted, with up to 3 tries about 30 seconds apart. Most of the time the user never knows anything happened. Only if that doesn't work do they get an alert with a **Restart OneDrive** button.
 * **Finds folders that have stopped syncing.** It compares what's on disk with what OneDrive is actually syncing. It catches:
   * library folders OneDrive has dropped
+  * old copies left behind when the same library now syncs to a new folder (for example after the organisation was renamed)
+  * folders from an account that is no longer connected
   * leftover organisation folders
 
   Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are never flagged.
 * **Explains it in plain English.** Every alert has a **What does this mean?** link written for people who don't know or care how OneDrive works.
 * **Makes it easy to get help.** **Contact support** offers to e-mail your service desk with a full diagnostic report already in the message, or to open your support website.
-* **Fixes broken folders safely**, after an administrator approves. It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again. If anything is in doubt, nothing is deleted and the folder goes back where it was. If files are locked by a program that won't let go, it can offer a restart (or, on Remote Desktop and virtual desktops, a sign-out) and finish the fix by itself when the user signs in again, even on a different session host.
+* **Fixes broken folders safely**, after an administrator approves. It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again (unless it's an old copy of a library that already syncs elsewhere, or from an account that's no longer connected). If anything is in doubt, nothing is deleted and the folder goes back where it was. If files are locked by a program that won't let go, it can offer a restart (or, on Remote Desktop and virtual desktops, a sign-out) and finish the fix by itself when the user signs in again, even on a different session host.
 * **Puts a status icon in the system tray**, so when a user rings you, you can see straight away what's wrong, even if they closed the alert.
 * **Writes everything to the Windows event log**, so your RMM can raise a ticket or alert you.
 * **Can be branded per customer**: company name, logo, support contact, colours and wording, all set from a settings file you push out with your RMM.
@@ -51,9 +53,16 @@ A few rules keep this sensible:
 
 <img src="docs/images/alert-onedrive-not-running.png" width="477" alt="OneDrive is not running alert">
 
-**When folders have stopped syncing**
+**When folders aren't syncing**
 
-<img src="docs/images/alert-folders-not-syncing.png" width="477" alt="Folders have stopped syncing alert">
+<img src="docs/images/alert-folders-not-syncing.png" width="477" alt="Problems found with your OneDrive / SharePoint sync alert">
+
+The warning comes first. The folders are listed below it in groups, so the user (and you) can see at a glance what happened to each one:
+
+* **Stopped syncing**: OneDrive has dropped the library, but the account is still connected. The fix syncs it again.
+* **Old copies**: the same library now syncs to a new folder, shown in the heading (typically after the organisation was renamed or the account was added again). The fix saves the files from the old copy and removes it.
+* **From an account that is no longer connected**: the fix saves the files and removes the folder.
+* **Empty leftover folders**: organisation folders with nothing in them; the fix just removes them.
 
 The alerts appear in the bottom right corner of the screen. They're deliberately not Windows notifications, so they don't get lost among everything else:
 
@@ -73,7 +82,7 @@ Questions and messages (the fix confirmation and its result, the administrator a
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.9.2 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.0 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -88,7 +97,7 @@ Hover over it to see the version and a one-line summary, for example "AcmeCorp -
 
 Fixing a broken folder means deleting it from the PC, so we were careful:
 
-1. **The user confirms.** They're told which folders will be fixed and whether each one can be reconnected automatically.
+1. **The user confirms.** They're told which folders will be fixed and, for each one, whether it will be reconnected automatically, by hand, or not at all (old copies and folders from disconnected accounts).
 2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it. If nobody answers within 15 minutes, the user is told nothing changed (event 5010); the approval window closes itself after 10 minutes, and a late approval does nothing.
 3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told which program to close (for example "Microsoft Excel has a file in it open") and to try again; other folders carry on. If every folder was skipped, the user is told plainly that nothing was changed. See [When files are locked](#when-files-are-locked) for the restart option.
 4. **Files are saved.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts. Each copy is written to disk, its size checked, and the original is confirmed unchanged while it was being read.
@@ -296,15 +305,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.9.2; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.9.2'
+$Version = 'v0.10.0'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = '58D4C53FD357EFC4A0904EB9D7EBC15049F05B2F6C0AD3C67E5BEAF789D63465'
-    'arm64' = 'B96FC750589C15E5463897EDDE705888B77FC5060676796BD38B4426AD36F836'
+    'x64'   = 'E4B937CA42C290F2E110BC9BCD3494367DFDC5205E6112A818025BA23D4759DF'
+    'arm64' = '9D24EF8067D510EED14259DCC3EDF5FE6DED74CF0128192A6A229129B1EBFDC9'
 }
 $Settings = @'
 {
@@ -502,6 +511,15 @@ OneDrive's provider list is only used as history, because it keeps entries for l
 The organisation folders OneDrive creates in the profile (they carry a OneDrive `desktop.ini`) are then checked. Anything inside one that isn't being synced is reported. So is an organisation folder that's empty apart from `desktop.ini`.
 
 Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are never reported, even when no signed-in account uses them. Every PC signed in to a work account has an empty `OneDrive` placeholder, so flagging them would raise false alarms on almost every new machine.
+
+Each folder found is then sorted by what became of its library. The tool works out which library a folder held, from its own record of libraries it has seen syncing, OneDrive's old entries for that folder, and the `ClientPolicy` files OneDrive leaves behind. It compares that with what OneDrive is syncing right now:
+
+* **Old copy**: the same library (same site and list IDs, or the same SharePoint address) syncs to another folder that OneDrive is actively syncing. A list ID alone isn't enough, because every site's default library can share one.
+* **Stopped syncing**: the library isn't synced anywhere, but a signed-in account belongs to the same organisation (same tenant ID or SharePoint address).
+* **From an account that is no longer connected**: no signed-in account belongs to its organisation.
+* If the library can't be identified at all, it's shown as stopped syncing, as before.
+
+This only changes the wording and whether the library is synced again after a fix. It never changes which folders count as broken, or the safety checks.
 
 To reconnect a library automatically we need its site, web and list IDs. Those are recorded while the library is healthy. They can also be recovered from the `ClientPolicy` files OneDrive leaves behind, which means even libraries that broke before this tool was installed can usually be reconnected.
 

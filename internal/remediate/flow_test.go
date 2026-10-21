@@ -123,6 +123,54 @@ func TestPanicDuringExecuteReleasesLockAndIsRecoverable(t *testing.T) {
 	}
 }
 
+// Old copies and folders from a disconnected account are saved and removed
+// but never synced again; the confirmation must not promise a re-sync.
+func TestConfirmationForFoldersThatAreNotResynced(t *testing.T) {
+	lib := &onedrive.Library{UserEmail: "d@contoso.com"}
+	moved := onedrive.Orphan{Name: "Internal - Documents", Path: `C:\Users\d\OLD\Internal - Documents`, Kind: onedrive.KindMoved,
+		MovedTo: `C:\Users\d\New\Internal - Documents`, Library: lib, WebURL: "https://contoso.sharepoint.com/sites/internal"}
+	gone := onedrive.Orphan{Name: "Shared - Documents", Path: `C:\Users\d\Northwind\Shared - Documents`, Kind: onedrive.KindDisconnected, Library: lib}
+	stopped := onedrive.Orphan{Name: "Bids - Documents", Path: `C:\Users\d\New\Bids - Documents`, Kind: onedrive.KindStopped, Library: lib}
+	for _, o := range []onedrive.Orphan{moved, gone} {
+		if o.NeedsResync() || strings.Contains(ResyncNote(o), "synced again automatically") {
+			t.Errorf("%s must not be re-synced: %q", o.Name, ResyncNote(o))
+		}
+	}
+	if !strings.Contains(ResyncNote(moved), moved.MovedTo) || !strings.Contains(ResyncNote(gone), "no longer connected") {
+		t.Errorf("notes: %q / %q", ResyncNote(moved), ResyncNote(gone))
+	}
+	if p := (&Plan{Items: []Item{{Orphan: moved}}}).Summary(); !strings.Contains(p, "will not be re-synced") {
+		t.Errorf("approval summary: %s", p)
+	}
+
+	confirmation := func(orphans ...onedrive.Orphan) string {
+		saved := flow
+		defer func() { flow = saved }()
+		var items []Item
+		for _, o := range orphans {
+			items = append(items, Item{Orphan: o})
+		}
+		text := ""
+		flow = flowEnv{
+			target:  func() (Target, error) { return Target{UserName: "d", SID: "S-1-5-21-1"}, nil },
+			recover: func(Target, *log.Logger) {},
+			plan: func(Target, config.Config) (*Plan, error) {
+				return &Plan{Items: items, FreeBytes: 10, Required: 1}, nil
+			},
+			confirm: func(_, m string) bool { text = m; return false },
+			warn:    func(string, string) {}, fail: func(string, string) {}, info: func(string, string) {},
+		}
+		UserFlow("agent.exe", discard, func(bool) {}, func() bool { return false })
+		return text
+	}
+	if c := confirmation(moved, gone); c == "" || strings.Contains(c, "sync the libraries again") {
+		t.Errorf("no re-sync step expected:\n%s", c)
+	}
+	if c := confirmation(moved, stopped); !strings.Contains(c, "3. Ask OneDrive to sync the libraries again") {
+		t.Errorf("re-sync step expected for the stopped library:\n%s", c)
+	}
+}
+
 // UserFlow on an approval timeout: the user is told nothing changed, Execute
 // is not called, and UserFlow (so the agent's "fixing" state) lasts until the
 // stale UAC call returns.

@@ -194,6 +194,10 @@ func check() error {
 			fmt.Printf("    contains the user's %s folder - will not be fixed automatically\n", strings.Join(o.KnownFolders, "/"))
 		case o.EmptyOrg:
 			fmt.Printf("    empty leftover organisation folder (nothing to re-sync)\n")
+		case o.Kind == onedrive.KindMoved:
+			fmt.Printf("    old copy: the library now syncs to %s (not re-synced)\n", o.MovedTo)
+		case o.Kind == onedrive.KindDisconnected:
+			fmt.Printf("    from an account that is no longer connected (not re-synced)\n")
 		case o.CanResync():
 			fmt.Printf("    re-sync: %s\n", o.Library.ResyncURL())
 		case o.WebURL != "":

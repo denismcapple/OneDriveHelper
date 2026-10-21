@@ -38,10 +38,13 @@ type Button struct {
 	Stay    bool // Ask/AskWithin: run Action but keep waiting (e.g. "Copy")
 }
 
-// Item is one listed problem: a bold title, an optional path on its own
-// line in a smaller font, and an optional explanatory note.
+// Item is one listed problem: a title, an optional path on its own line in a
+// smaller grey font, and an optional explanatory note. The list is drawn
+// smaller than the card's title and text, so those stand out. An Item with
+// Heading set is a group heading (bold, Title only).
 type Item struct {
 	Title, Path, Note string
+	Heading           bool
 }
 
 // Spec describes a card. Showing a Spec with an existing ID updates that card.
@@ -78,7 +81,7 @@ type Manager struct {
 	logos  map[string]logoEntry
 }
 
-type fonts struct{ brand, title, body, button, small uintptr }
+type fonts struct{ brand, title, body, button, small, heading, item uintptr }
 
 var (
 	wndProcCB   uintptr
@@ -140,11 +143,13 @@ func (m *Manager) loop(ready chan<- error) {
 		m.dpi = ForceDPI
 	}
 	m.fonts = fonts{
-		brand:  createFont(m.s(12), 600),
-		title:  createFont(m.s(17), 600),
-		body:   createFont(m.s(14), 400),
-		button: createFont(m.s(14), 600),
-		small:  createFont(m.s(12), 400),
+		brand:   createFont(m.s(12), 600),
+		title:   createFont(m.s(17), 600),
+		body:    createFont(m.s(14), 400),
+		button:  createFont(m.s(14), 600),
+		small:   createFont(m.s(11), 400), // item paths
+		heading: createFont(m.s(13), 600), // item group headings
+		item:    createFont(m.s(12), 400), // item titles and notes
 	}
 	ready <- nil
 

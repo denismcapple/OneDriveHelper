@@ -134,21 +134,32 @@ func (c *card) layout() {
 		c.body = rect{}
 	}
 
-	// Items: bold name, path in small grey on one line, then the note.
+	// Items: name, path in small grey on one line, then the note. Group
+	// headings are bold and get a little more space above them.
 	c.items = make([]itemRects, len(c.spec.Items))
 	for i, it := range c.spec.Items {
-		y += m.s(12)
 		var r itemRects
-		_, h := measure(m.fonts.button, it.Title, inner, dtWordBreak|dtEditControl)
-		r.title = rect{Left: pad, Top: y, Right: pad + inner, Bottom: y + h}
+		font, left := m.fonts.item, pad+m.s(6)
+		if it.Heading {
+			font, left = m.fonts.heading, pad
+			y += m.s(14)
+		} else {
+			y += m.s(7)
+		}
+		_, h := measure(font, it.Title, pad+inner-left, dtWordBreak|dtEditControl)
+		r.title = rect{Left: left, Top: y, Right: pad + inner, Bottom: y + h}
 		y += h
+		if it.Heading {
+			c.items[i] = r
+			continue
+		}
 		if it.Path != "" {
 			_, h = measure(m.fonts.small, it.Path, inner-indent, dtSingleLine)
-			r.path = rect{Left: pad + indent, Top: y + m.s(2), Right: pad + inner, Bottom: y + m.s(2) + h}
-			y += h + m.s(4)
+			r.path = rect{Left: pad + indent, Top: y + m.s(1), Right: pad + inner, Bottom: y + m.s(1) + h}
+			y += h + m.s(2)
 		}
 		if it.Note != "" {
-			_, h = measure(m.fonts.body, it.Note, inner-indent, dtWordBreak|dtEditControl)
+			_, h = measure(m.fonts.item, it.Note, inner-indent, dtWordBreak|dtEditControl)
 			r.note = rect{Left: pad + indent, Top: y + m.s(2), Right: pad + inner, Bottom: y + m.s(2) + h}
 			y += h + m.s(2)
 		}
@@ -314,7 +325,11 @@ func (c *card) paint(target uintptr) {
 	for i, it := range c.spec.Items {
 		r := c.items[i]
 		r.title, r.path, r.note = off(r.title), off(r.path), off(r.note)
-		call(pSelectObject, dc, m.fonts.button)
+		if it.Heading {
+			call(pSelectObject, dc, m.fonts.heading)
+		} else {
+			call(pSelectObject, dc, m.fonts.item)
+		}
 		call(pSetTextColor, dc, colorTitle)
 		drawText(dc, it.Title, &r.title, dtWordBreak|dtEditControl|dtNoPrefix)
 		if it.Path != "" {
@@ -323,7 +338,7 @@ func (c *card) paint(target uintptr) {
 			drawText(dc, it.Path, &r.path, dtSingleLine|dtNoPrefix|dtPathEllipsis)
 		}
 		if it.Note != "" {
-			call(pSelectObject, dc, m.fonts.body)
+			call(pSelectObject, dc, m.fonts.item)
 			call(pSetTextColor, dc, colorBody)
 			drawText(dc, it.Note, &r.note, dtWordBreak|dtEditControl|dtNoPrefix)
 		}

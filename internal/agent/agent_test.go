@@ -72,6 +72,34 @@ func TestNotRunningSpec(t *testing.T) {
 	}
 }
 
+func TestOrphanGroups(t *testing.T) {
+	var items []string
+	for _, it := range orphanSpec(config.Defaults(), DemoOrphans(), Actions{}).Items {
+		if it.Heading {
+			items = append(items, "# "+it.Title)
+		} else {
+			items = append(items, it.Title)
+		}
+	}
+	want := []string{
+		"# Stopped syncing (1)", "•  Projects - Documents",
+		`# Old copies: these libraries now sync to "AcmeCorp" (2)`, "•  Finance - Documents", "•  Sales - Documents",
+		"# From an account that is no longer connected (1)", "•  Bids Team - Documents",
+		"# Empty leftover folders (1)", "•  Contoso Ltd",
+	}
+	if strings.Join(items, "\n") != strings.Join(want, "\n") {
+		t.Errorf("items:\n%s\nwant:\n%s", strings.Join(items, "\n"), strings.Join(want, "\n"))
+	}
+	// Old copies that moved to different organisation folders get a general heading.
+	moved := []onedrive.Orphan{
+		{Name: "A", Path: `C:\Users\d\Old\A`, Kind: onedrive.KindMoved, MovedTo: `C:\Users\d\One\A`},
+		{Name: "B", Path: `C:\Users\d\Old\B`, Kind: onedrive.KindMoved, MovedTo: `C:\Users\d\Two\B`},
+	}
+	if g := orphanGroups(moved); len(g) != 1 || g[0].heading != "Old copies: these libraries now sync to a new folder (2)" {
+		t.Errorf("groups: %+v", g)
+	}
+}
+
 func TestOrphanSpec(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.SupportName = "Contoso Service Desk"
@@ -81,15 +109,17 @@ func TestOrphanSpec(t *testing.T) {
 	}
 	var snoozed []string
 	s := orphanSpec(cfg, orphans, Actions{Snooze: func(id, d string) { snoozed = append(snoozed, id) }})
-	if !strings.Contains(s.Title, "7 SharePoint libraries") || s.Body != defaultOrphan ||
+	if s.Title != orphanTitle || s.Body != defaultOrphan ||
 		!strings.Contains(s.Footer, "and 1 more") || !strings.Contains(s.Footer, "Contoso Service Desk") {
 		t.Errorf("title/body/footer: %q / %q / %q", s.Title, s.Body, s.Footer)
 	}
-	if len(s.Items) != maxListed || s.Items[0].Path != `C:\Users\d\Org\A` || s.Items[0].Title != "•  A (Org)" {
+	if len(s.Items) != maxListed+1 || !s.Items[0].Heading || s.Items[0].Title != "Stopped syncing (7)" ||
+		s.Items[1].Path != `C:\Users\d\Org\A` || s.Items[1].Title != "•  A" {
 		t.Errorf("items: %+v", s.Items)
 	}
-	if got := orphanSpec(cfg, []onedrive.Orphan{{Name: "Old", Path: `C:\Users\d\Old`, TenantRoot: `C:\Users\d\Old`, EmptyOrg: true}}, Actions{}).Title; got != "A OneDrive folder has stopped syncing" {
-		t.Errorf("a leftover organisation folder is not a SharePoint library: %q", got)
+	empty := orphanSpec(cfg, []onedrive.Orphan{{Name: "Old", Path: `C:\Users\d\Old`, TenantRoot: `C:\Users\d\Old`, EmptyOrg: true}}, Actions{})
+	if empty.Title != orphanTitle || empty.Items[0].Title != "Empty leftover folders (1)" {
+		t.Errorf("leftover organisation folder: %q %+v", empty.Title, empty.Items)
 	}
 	var labels []string
 	for _, b := range s.Buttons {

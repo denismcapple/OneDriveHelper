@@ -265,7 +265,7 @@ func Execute(p *Plan, lg *log.Logger, ev *elog.Log, stop func() bool) (*Result, 
 
 	for _, it := range p.Items {
 		out := Outcome{Path: it.Orphan.Path, SavedTo: filepath.Join(res.RunDir, it.SaveAs), WebURL: it.Orphan.WebURL}
-		if it.Orphan.CanResync() {
+		if it.Orphan.NeedsResync() && it.Orphan.CanResync() {
 			out.ResyncURL = it.Orphan.Library.ResyncURL()
 		}
 		if res.Stopped || stop() {

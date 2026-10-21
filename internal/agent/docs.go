@@ -19,13 +19,17 @@ func DemoConfig() config.Config {
 	return c
 }
 
-// DemoOrphans are made-up broken folders covering each re-sync case.
+// DemoOrphans are made-up broken folders covering each group and re-sync case.
 func DemoOrphans() []onedrive.Orphan {
 	return []onedrive.Orphan{
-		{Name: "Projects - Documents", Path: `C:\Users\jsmith\Fabrikam\Projects - Documents`, TenantRoot: `C:\Users\jsmith\Fabrikam`,
-			Library: &onedrive.Library{UserEmail: "jsmith@acmecorp.example", WebURL: "https://fabrikam.sharepoint.com/sites/projects"}},
-		{Name: "Finance - Documents", Path: `C:\Users\jsmith\AcmeCorp\Finance - Documents`, TenantRoot: `C:\Users\jsmith\AcmeCorp`,
-			WebURL: "https://acmecorp.sharepoint.com/sites/finance"},
+		{Name: "Projects - Documents", Path: `C:\Users\jsmith\AcmeCorp\Projects - Documents`, TenantRoot: `C:\Users\jsmith\AcmeCorp`,
+			Kind: onedrive.KindStopped, Library: &onedrive.Library{UserEmail: "jsmith@acmecorp.example", WebURL: "https://acmecorp.sharepoint.com/sites/projects"}},
+		{Name: "Finance - Documents", Path: `C:\Users\jsmith\ACME CORPORATION LTD\Finance - Documents`, TenantRoot: `C:\Users\jsmith\ACME CORPORATION LTD`,
+			Kind: onedrive.KindMoved, MovedTo: `C:\Users\jsmith\AcmeCorp\Finance - Documents`, WebURL: "https://acmecorp.sharepoint.com/sites/finance"},
+		{Name: "Sales - Documents", Path: `C:\Users\jsmith\ACME CORPORATION LTD\Sales - Documents`, TenantRoot: `C:\Users\jsmith\ACME CORPORATION LTD`,
+			Kind: onedrive.KindMoved, MovedTo: `C:\Users\jsmith\AcmeCorp\Sales - Documents`, WebURL: "https://acmecorp.sharepoint.com/sites/sales"},
+		{Name: "Bids Team - Documents", Path: `C:\Users\jsmith\Fabrikam\Bids Team - Documents`, TenantRoot: `C:\Users\jsmith\Fabrikam`,
+			Kind: onedrive.KindDisconnected, WebURL: "https://fabrikam.sharepoint.com/sites/bids"},
 		{Name: "Contoso Ltd", Path: `C:\Users\jsmith\Contoso Ltd`, TenantRoot: `C:\Users\jsmith\Contoso Ltd`, EmptyOrg: true},
 	}
 }

@@ -152,7 +152,7 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 	if len(s.Orphans) == 0 {
 		b.WriteString("\nShared folders:  all syncing.")
 	} else {
-		fmt.Fprintf(&b, "\n\nFolders that have stopped syncing (%d):", len(s.Orphans))
+		fmt.Fprintf(&b, "\n\nOneDrive / SharePoint folders that aren't syncing (%d):", len(s.Orphans))
 		items, footer = orphanItems(s.Orphans, remediate.ResyncNote)
 		if s.OrphanSnooze.Active {
 			footer = strings.TrimSpace(footer + "\n\nThe alert for these folders is ignored " + s.OrphanSnooze.Describe() + ".")
@@ -224,7 +224,7 @@ func Report(c config.Config, s Status, logPath string) string {
 	}
 	fmt.Fprintf(&b, "\r\nFolders not syncing (%d):\r\n", len(s.Orphans))
 	for _, o := range s.Orphans {
-		fmt.Fprintf(&b, "  - %s\r\n    path:    %s\r\n    re-sync: %s\r\n", o.DisplayName(), o.Path, remediate.ResyncNote(o))
+		fmt.Fprintf(&b, "  - %s\r\n    path:    %s\r\n    kind:    %s\r\n    re-sync: %s\r\n", o.DisplayName(), o.Path, kindName(o), remediate.ResyncNote(o))
 		if o.WebURL != "" {
 			fmt.Fprintf(&b, "    site:    %s\r\n", o.WebURL)
 		}
@@ -254,13 +254,25 @@ func Report(c config.Config, s Status, logPath string) string {
 	return b.String()
 }
 
+// kindName describes an orphan's classification for support reports.
+func kindName(o onedrive.Orphan) string {
+	switch {
+	case o.EmptyOrg:
+		return "empty leftover organisation folder"
+	case o.Kind == onedrive.KindMoved:
+		return "old copy (the library now syncs to " + o.MovedTo + ")"
+	case o.Kind == onedrive.KindDisconnected:
+		return "from an account that is no longer connected"
+	case o.Kind == onedrive.KindStopped:
+		return "stopped syncing (the account is still connected)"
+	}
+	return "stopped syncing (library not identified)"
+}
+
 // PreviewStatus shows the tray icon, the status card and both alerts with
 // sample data (used for visual checks).
 func PreviewStatus(ui *popup.Manager, c config.Config) {
-	s := Status{At: time.Now(), Configured: true, Running: true, Orphans: []onedrive.Orphan{
-		{Name: "Contoso Ltd", Path: `C:\Users\jsmith\Contoso Ltd`, TenantRoot: `C:\Users\jsmith\Contoso Ltd`, EmptyOrg: true},
-		{Name: "Bids Team - Documents", Path: `C:\Users\jsmith\Fabrikam\Bids Team - Documents`, TenantRoot: `C:\Users\jsmith\Fabrikam`},
-	}}
+	s := Status{At: time.Now(), Configured: true, Running: true, Orphans: DemoOrphans()}
 	nop := Actions{Relaunch: func() {}, Snooze: func(string, string) {}, Support: func() {}, Email: func() {}, Website: func() {},
 		Fix: func() {}, Explain: func(string) {}, CopyDetails: func() {}}
 	ui.SetTray(popup.Tray{Tooltip: trayTooltip(c, s), Severity: s.severity()})

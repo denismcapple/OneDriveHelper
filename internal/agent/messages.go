@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
@@ -19,7 +20,9 @@ const (
 	defaultAutoRestartFailed = "Your files are NOT being synced or backed up. OneDrive has closed, and it didn't start again " +
 		"when we tried to restart it automatically.\n\n" +
 		"Click 'Restart OneDrive' to try again. If it still won't start, please contact support."
-	defaultOrphan = "These folders are still on your PC, but changes saved in them are NOT uploaded or backed up."
+	defaultOrphan = "Some folders on this PC are no longer syncing. Files saved in them are NOT uploaded or backed up."
+
+	orphanTitle = "Problems found with your OneDrive / SharePoint sync"
 
 	maxListed = 6
 )
@@ -102,33 +105,84 @@ func notRunningSpec(c config.Config, a Actions, autoFailed bool) popup.Spec {
 	return s
 }
 
-// orphanItems lists folders as name + path (+ note), capped at maxListed.
+// orphanGroup is one group of folders on the cards, e.g. "Old copies".
+type orphanGroup struct {
+	heading string
+	orphans []onedrive.Orphan
+}
+
+// orphanGroups sorts folders by what became of their library. Folders whose
+// library can't be identified are shown as stopped (as before 0.10).
+func orphanGroups(orphans []onedrive.Orphan) []orphanGroup {
+	var stopped, moved, gone, empty []onedrive.Orphan
+	for _, o := range orphans {
+		switch {
+		case o.EmptyOrg:
+			empty = append(empty, o)
+		case o.Kind == onedrive.KindMoved:
+			moved = append(moved, o)
+		case o.Kind == onedrive.KindDisconnected:
+			gone = append(gone, o)
+		default:
+			stopped = append(stopped, o)
+		}
+	}
+	movedHeading := "Old copies: these libraries now sync to a new folder"
+	if len(moved) > 0 {
+		org := filepath.Base(filepath.Dir(moved[0].MovedTo))
+		for _, o := range moved[1:] {
+			if !strings.EqualFold(filepath.Base(filepath.Dir(o.MovedTo)), org) {
+				org = ""
+			}
+		}
+		if org != "" && org != "." && org != `\` {
+			movedHeading = fmt.Sprintf("Old copies: these libraries now sync to %q", org)
+		}
+	}
+	var out []orphanGroup
+	for _, g := range []orphanGroup{
+		{"Stopped syncing", stopped},
+		{movedHeading, moved},
+		{"From an account that is no longer connected", gone},
+		{"Empty leftover folders", empty},
+	} {
+		if len(g.orphans) > 0 {
+			g.heading = fmt.Sprintf("%s (%d)", g.heading, len(g.orphans))
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// orphanItems lists folders by group: a heading, then name + path (+ note)
+// for each folder, at most maxListed folders in all.
 func orphanItems(orphans []onedrive.Orphan, note func(onedrive.Orphan) string) ([]popup.Item, string) {
 	var items []popup.Item
-	for i, o := range orphans {
-		if i == maxListed {
-			return items, fmt.Sprintf("…and %d more.", len(orphans)-maxListed)
+	listed := 0
+	for _, g := range orphanGroups(orphans) {
+		if listed == maxListed {
+			break
 		}
-		it := popup.Item{Title: "•  " + o.DisplayName(), Path: o.Path}
-		if note != nil {
-			it.Note = note(o)
+		items = append(items, popup.Item{Title: g.heading, Heading: true})
+		for _, o := range g.orphans {
+			if listed == maxListed {
+				break
+			}
+			it := popup.Item{Title: "•  " + o.Name, Path: o.Path}
+			if note != nil {
+				it.Note = note(o)
+			}
+			items = append(items, it)
+			listed++
 		}
-		items = append(items, it)
+	}
+	if listed < len(orphans) {
+		return items, fmt.Sprintf("…and %d more.", len(orphans)-listed)
 	}
 	return items, ""
 }
 
 func orphanSpec(c config.Config, orphans []onedrive.Orphan, a Actions) popup.Spec {
-	one, many := "A SharePoint library has", "SharePoint libraries have"
-	for _, o := range orphans {
-		if o.EmptyOrg {
-			one, many = "A OneDrive folder has", "OneDrive folders have"
-		}
-	}
-	title := one + " stopped syncing"
-	if len(orphans) > 1 {
-		title = fmt.Sprintf("%d %s stopped syncing", len(orphans), many)
-	}
 	items, more := orphanItems(orphans, nil)
 	footer := c.SupportContact()
 	if more != "" {
@@ -136,7 +190,7 @@ func orphanSpec(c config.Config, orphans []onedrive.Orphan, a Actions) popup.Spe
 	}
 	s := popup.Spec{
 		ID: idOrphans, Severity: popup.Critical, Brand: c.Title(), Logo: c.LogoPath(), Sound: c.PopupSound, Accent: c.AccentColor,
-		Title: title, Body: or(c.OrphanMessage, defaultOrphan), Items: items, Footer: footer,
+		Title: orphanTitle, Body: or(c.OrphanMessage, defaultOrphan), Items: items, Footer: footer,
 		OnHelp: func() { a.Explain(topicOrphans) },
 	}
 	if b, ok := ignoreButton(c, a, idOrphans); ok {
