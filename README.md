@@ -2,25 +2,13 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.9.0** ([release notes and downloads](https://github.com/denismcapple/OneDriveHelper/releases/latest)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.9.0** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> [!WARNING]
-> **0.9.0 has not been fully tested on Remote Desktop (RDS) session hosts yet**, including multi-host farms with FSLogix, Azure Virtual Desktop and Citrix. Take extra care there: try it on one host or a small pilot group first, and keep 0.8.2 available to roll back to. Full testing, including signing out to finish a fix and picking it up on another session host, will be done in the next few days, and this note will be updated then. Single-user workstations are covered by the automated tests, but haven't had the full manual checks in [docs/release-checklist.md](docs/release-checklist.md) yet either.
-
-> [!NOTE]
-> **Fixed on `main` (not yet in a release): "The fix can't start right now" on PCs used by more than one person.** In 0.8.0 to 0.9.0, if anyone else had ever signed in to OneDrive on the same PC, clicking **Fix** stopped with *"some of OneDrive's settings could not be read (...SyncRootManager\OneDrive!S-1-12-1-...\UserSyncRoots: Access is denied.)"*, and event 5013 was logged. Windows lets only the owner read those settings, so the tool now reads only the signed-in user's own. Nothing is unsafe in the meantime: the tool refused and changed nothing. It will be in the next release.
-
-> **New in 0.9.0: nicer popups, your logo, and fixes that finish themselves.**
-> * **Card popups instead of Windows message boxes.** Every question and message (the fix confirmation and result, the administrator approval, contact details, "What does this mean?", the settings tool) now uses the same style of card as the alerts. Long ones scroll, and warnings have a **Copy text** button.
-> * **Company logo.** Pick a PNG in the settings tool (250 x 75 pixels works well). It's shown at the top of every card, and **Export** saves it as `logo.png` next to the settings file. See [The settings tool](#the-settings-tool).
-> * **Locked files no longer stop a fix for good.** If a program won't let go of a file, the user can restart (on a single-user workstation) or sign out (on Remote Desktop and virtual desktops). The fix then finishes by itself at their next sign-in, on whichever session host they land on, with no second approval. See [When files are locked](#when-files-are-locked).
-> * **Recovery report.** A fix that doesn't finish cleanly leaves a `RECOVERY-REPORT.txt` saying where each folder is, where its backup is, and which copy has the user's latest edits. A new fix never overwrites an earlier backup.
+> **Latest update (0.9.0): nicer popups, your logo, and fixes that finish themselves.** Every message is now a branded card instead of a Windows message box, you can add your company logo, a fix held up by locked files finishes by itself after a restart or sign-out, and a fix that doesn't finish cleanly leaves a `RECOVERY-REPORT.txt`. See [When files are locked](#when-files-are-locked) and [The settings tool](#the-settings-tool).
 >
-> **New in 0.8.2: clean event log entries.** Event Viewer no longer puts "The description for Event ID ... cannot be found" above every OneDrive Helper event; the event text is now built into the tool. Upgrading fixes events already in the log too. Event IDs are unchanged, so RMM monitors keep working. See [Getting alerts in your RMM](#getting-alerts-in-your-rmm).
+> **Not yet tested on Remote Desktop (RDS), Azure Virtual Desktop or Citrix.** Pilot it on one host first and keep 0.8.2 to roll back to.
 >
-> **New in 0.8.1: no more false alarms on new PCs.** Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are no longer reported. A freshly set-up PC signed in to a work account always has an empty, unused `OneDrive` folder, which 0.7.0 and 0.8.0 wrongly flagged as "stopped syncing". The alert's heading now also says "OneDrive folder" rather than "SharePoint library" when the list includes a leftover organisation folder.
->
-> **New in 0.8.0: a much safer fix.** The folder fix is the only part of the tool that deletes anything, so it now moves each folder out of the way before saving it, deletes only files it has proven it saved, puts everything back if anything is in doubt, and recovers by itself if it's interrupted. Upgrades wait for a fix in progress, and roll back if they fail. The details are in [How the fix works](#how-the-fix-works).
+> **Coming in the next release:** a fix for *"The fix can't start right now ... UserSyncRoots: Access is denied"* on PCs where more than one person uses OneDrive. 0.9.0 refuses the fix there and changes nothing.
 
 <p align="center">
   <img src="docs/images/status-problems.png" width="716" alt="OneDrive Helper status window listing folders that have stopped syncing">
