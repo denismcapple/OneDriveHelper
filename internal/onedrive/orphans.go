@@ -140,7 +140,7 @@ func Gather(h Hive, profileDir string) Inputs {
 		ProfileDir: profileDir,
 		Accounts:   accts,
 		Providers:  providers(h, r),
-		SyncRoots:  registeredSyncRoots(r),
+		SyncRoots:  registeredSyncRoots(Hive{Root: registry.LOCAL_MACHINE}, h.SID, r),
 		Known:      loadLibraries(h, r),
 	}
 	if profileDir != "" {

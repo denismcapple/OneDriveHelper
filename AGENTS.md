@@ -19,6 +19,7 @@ Go 1.27+ on PATH (for example `C:\Program Files\Go\bin`; in PowerShell `$env:Pat
 
 ## Conventions / gotchas
 - Never treat `HKCU\Software\SyncEngines\Providers\OneDrive` as proof a library is active (stale entries persist); active = Accounts\*\Tenants, ScopeIdToMountPointPathCache, UserFolder, HKLM SyncRootManager.
+- HKLM SyncRootManager: read only the target user's `OneDrive!<SID>!...` keys (`Hive.SID`). Other users' `UserSyncRoots` are owner-only (ACCESS_DENIED), and reading them blocked every fix on shared PCs. An empty `Hive.SID` is a read error; test hives must set it.
 - `libraryScope` lines in `%LOCALAPPDATA%\Microsoft\OneDrive\settings\BusinessN\*.ini` are UTF-16LE without BOM; field 8/9/10 = SiteID/WebID/ListID.
 - Remediation must never follow junctions/symlinks; use `internal/fsutil.ReadDir` and the handle-holding walker in `internal/remediate/tree.go`.
 - Alerts are custom Win32 popups (`internal/popup`), NOT Windows toasts (user requirement). All window work happens on the popup manager's locked UI thread; other goroutines use `Manager.Show/Hide`. Button actions run on new goroutines. One manager per process: get it with `popup.Shared()`.

@@ -1,6 +1,7 @@
 package onedrive
 
 import (
+	"errors"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
@@ -92,21 +93,38 @@ func providers(h Hive, r *readErrs) []Provider {
 	return out
 }
 
-// RegisteredSyncRoots returns every folder registered with the Windows Cloud
-// Files API by OneDrive (for all users), from HKLM SyncRootManager.
-func RegisteredSyncRoots() []string { return registeredSyncRoots(nil) }
+// RegisteredSyncRoots returns the folders registered with the Windows Cloud
+// Files API by OneDrive for the user sid, from HKLM SyncRootManager.
+func RegisteredSyncRoots(sid string) []string {
+	return registeredSyncRoots(Hive{Root: registry.LOCAL_MACHINE}, sid, nil)
+}
 
-func registeredSyncRoots(r *readErrs) []string {
-	lm := Hive{Root: registry.LOCAL_MACHINE}
+// registeredSyncRoots reads only sid's entries ("OneDrive!<SID>!<account>...").
+// Other users' UserSyncRoots keys are readable only by their owner, and their
+// folders can't be inside this user's profile, which is all a fix touches.
+// An unknown SID is a read error, so nothing is fixed on the strength of it.
+func registeredSyncRoots(lm Hive, sid string, r *readErrs) []string {
+	if sid == "" {
+		r.add(lm.Prefix+syncRootPath, errUnknownUser)
+		return nil
+	}
 	var out []string
 	for _, n := range lm.subKeys(syncRootPath, r) {
-		if !strings.HasPrefix(strings.ToLower(n), "onedrive!") {
+		if !ownSyncRoot(n, sid) {
 			continue
 		}
 		_, vals := lm.values(syncRootPath+`\`+n+`\UserSyncRoots`, r)
 		out = append(out, vals...)
 	}
 	return out
+}
+
+var errUnknownUser = errors.New("the user's SID is unknown")
+
+// ownSyncRoot reports whether a SyncRootManager key name is a OneDrive sync
+// root of sid.
+func ownSyncRoot(name, sid string) bool {
+	return strings.HasPrefix(strings.ToLower(name), "onedrive!"+strings.ToLower(sid)+"!")
 }
 
 func dedupe(in []string) []string {

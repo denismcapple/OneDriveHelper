@@ -315,5 +315,5 @@ func emptyHive(t *testing.T) onedrive.Hive {
 	}
 	k.Close()
 	t.Cleanup(func() { registry.DeleteKey(registry.CURRENT_USER, base) })
-	return onedrive.Hive{Root: registry.CURRENT_USER, Prefix: base + `\`}
+	return onedrive.Hive{Root: registry.CURRENT_USER, Prefix: base + `\`, SID: onedrive.CurrentUserHive().SID}
 }

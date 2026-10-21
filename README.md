@@ -7,6 +7,9 @@ A small Windows tool that keeps an eye on OneDrive for your users, and tells the
 > [!WARNING]
 > **0.9.0 has not been fully tested on Remote Desktop (RDS) session hosts yet**, including multi-host farms with FSLogix, Azure Virtual Desktop and Citrix. Take extra care there: try it on one host or a small pilot group first, and keep 0.8.2 available to roll back to. Full testing, including signing out to finish a fix and picking it up on another session host, will be done in the next few days, and this note will be updated then. Single-user workstations are covered by the automated tests, but haven't had the full manual checks in [docs/release-checklist.md](docs/release-checklist.md) yet either.
 
+> [!NOTE]
+> **Fixed on `main` (not yet in a release): "The fix can't start right now" on PCs used by more than one person.** In 0.8.0 to 0.9.0, if anyone else had ever signed in to OneDrive on the same PC, clicking **Fix** stopped with *"some of OneDrive's settings could not be read (...SyncRootManager\OneDrive!S-1-12-1-...\UserSyncRoots: Access is denied.)"*, and event 5013 was logged. Windows lets only the owner read those settings, so the tool now reads only the signed-in user's own. Nothing is unsafe in the meantime: the tool refused and changed nothing. It will be in the next release.
+
 > **New in 0.9.0: nicer popups, your logo, and fixes that finish themselves.**
 > * **Card popups instead of Windows message boxes.** Every question and message (the fix confirmation and result, the administrator approval, contact details, "What does this mean?", the settings tool) now uses the same style of card as the alerts. Long ones scroll, and warnings have a **Copy text** button.
 > * **Company logo.** Pick a PNG in the settings tool (250 x 75 pixels works well). It's shown at the top of every card, and **Export** saves it as `logo.png` next to the settings file. See [The settings tool](#the-settings-tool).
@@ -118,7 +121,7 @@ Some safety rules that are always applied:
 * It only touches folders inside the user's own profile.
 * It never touches a folder that contains the user's redirected Desktop or Documents.
 * It never follows junctions or symbolic links, and never puts a folder back through one. A folder with a junction or link anywhere in its path below the user's profile is refused (event 5009, naming the link).
-* It won't plan a fix while OneDrive's settings can't be read, while OneDrive is running for the user but shows no account yet (starting up or signing in), or while it can't tell whether OneDrive is running (event 5013). The user is asked to sign in to OneDrive first, or to contact support. A user who simply has no OneDrive account, or has signed out of all of them, can still be fixed.
+* It won't plan a fix while OneDrive's settings can't be read, while OneDrive is running for the user but shows no account yet (starting up or signing in), or while it can't tell whether OneDrive is running (event 5013). The user is asked to sign in to OneDrive first, or to contact support. A user who simply has no OneDrive account, or has signed out of all of them, can still be fixed. Only the user's own OneDrive settings count: other people who have signed in to the same PC don't affect it (Windows keeps their sync-folder registrations private to them).
 * A folder that couldn't be fully read when the fix was planned is never removed, as the confirmation says.
 * A delete that fails part-way (antivirus or a preview holding a file) stops at once. What wasn't deleted stays in the `Fixing` folder and is never moved back half-empty.
 

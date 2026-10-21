@@ -670,7 +670,7 @@ func unreadableHive(t *testing.T) onedrive.Hive {
 			registry.DeleteKey(registry.CURRENT_USER, base+p)
 		}
 	})
-	return onedrive.Hive{Root: registry.CURRENT_USER, Prefix: base + `\`}
+	return onedrive.Hive{Root: registry.CURRENT_USER, Prefix: base + `\`, SID: onedrive.CurrentUserHive().SID}
 }
 
 func setDACL(t *testing.T, k registry.Key, sddl string) {

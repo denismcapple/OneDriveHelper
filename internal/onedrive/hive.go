@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -12,11 +13,20 @@ import (
 type Hive struct {
 	Root   registry.Key
 	Prefix string
+	// SID is the user the hive belongs to. Only this user's entries are read
+	// from machine-wide OneDrive data (HKLM SyncRootManager).
+	SID string
 }
 
-func CurrentUserHive() Hive { return Hive{Root: registry.CURRENT_USER} }
+func CurrentUserHive() Hive {
+	h := Hive{Root: registry.CURRENT_USER}
+	if u, err := windows.GetCurrentProcessToken().GetTokenUser(); err == nil {
+		h.SID = u.User.Sid.String()
+	}
+	return h
+}
 
-func UserHive(sid string) Hive { return Hive{Root: registry.USERS, Prefix: sid + `\`} }
+func UserHive(sid string) Hive { return Hive{Root: registry.USERS, Prefix: sid + `\`, SID: sid} }
 
 func (h Hive) Open(path string, access uint32) (registry.Key, error) {
 	return registry.OpenKey(h.Root, h.Prefix+path, access)
