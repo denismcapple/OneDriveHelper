@@ -481,7 +481,38 @@ func cleanStaging(dir string) {
 	_ = removeDir(filepath.Dir(dir)) // Fixing, if now empty
 }
 
-// Text summarises the result.
+// userState says, in plain words, what happened to a folder that wasn't
+// fully fixed, and where it is now.
+func (o Outcome) userState() (what, where string) {
+	switch o.State {
+	case StateKept:
+		return "not removed, it is in the Fixing folder", o.StagedAt
+	case StatePartial:
+		return "only partly removed, the rest is in the Fixing folder", o.StagedAt
+	case StateRestored:
+		return "not changed, it is back where it was", o.Path
+	}
+	return "not changed", o.Path
+}
+
+// blocker is what stopped the folder being fixed, e.g. "Microsoft Excel has
+// a file in it open" ("" if nothing was recorded).
+func (o Outcome) blocker() string {
+	return strings.SplitN(o.Error, ". The folder is kept", 2)[0]
+}
+
+// fixed counts the folders that were fully fixed.
+func (r *Result) fixed() int {
+	n := 0
+	for _, o := range r.Outcomes {
+		if o.State == StateDone {
+			n++
+		}
+	}
+	return n
+}
+
+// Text summarises the result (for logs and the event log).
 func (r *Result) Text() string {
 	var b strings.Builder
 	for _, o := range r.Outcomes {

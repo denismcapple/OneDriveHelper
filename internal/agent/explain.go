@@ -5,6 +5,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
+	"github.com/denismcapple/OneDriveHelper/internal/remediate"
 )
 
 // Help topics shown by the "What does this mean?" link on each alert.
@@ -44,12 +45,13 @@ func Explain(c config.Config, topic string, orphans []onedrive.Orphan) string {
 	case topicOrphans:
 		var list strings.Builder
 		moved, gone := false, false
-		for _, o := range orphans {
-			list.WriteString("•  " + o.DisplayName() + "\n")
-			moved = moved || (!o.EmptyOrg && o.Kind == onedrive.KindMoved)
-			gone = gone || (!o.EmptyOrg && o.Kind == onedrive.KindDisconnected)
-		}
-		if list.Len() > 0 {
+		for _, g := range remediate.Groups(orphans) {
+			list.WriteString(g.Heading + "\n")
+			for _, o := range g.Orphans {
+				list.WriteString("•  " + o.DisplayName() + "\n")
+				moved = moved || o.Kind == onedrive.KindMoved
+				gone = gone || o.Kind == onedrive.KindDisconnected
+			}
 			list.WriteString("\n")
 		}
 		if moved {

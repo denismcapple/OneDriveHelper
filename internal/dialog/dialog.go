@@ -36,6 +36,9 @@ type Message struct {
 	Primary int      // index of the accent-coloured button; -1 = none
 	Copy    bool     // add a "Copy text" button (stays open) for passing details to support
 	Help    func()   // "What does this mean?" link in the header
+	Items   []popup.Item
+	Footer  string // text after the items
+	Wide    bool   // a wider card (see popup.Spec.Wide)
 }
 
 // Show displays m and returns the index of the button clicked (-1 if the
@@ -55,7 +58,7 @@ func ShowWithin(m Message, limit time.Duration) (int, bool) {
 	}
 	s := Spec(m, cfg)
 	if m.Copy {
-		text := m.Heading + "\r\n\r\n" + strings.ReplaceAll(strings.TrimSpace(m.Text), "\n", "\r\n")
+		text := m.Heading + "\r\n\r\n" + strings.ReplaceAll(strings.TrimSpace(m.PlainText()), "\n", "\r\n")
 		s.ID = "dialog-" + time.Now().Format("150405.000000000")
 		id := s.ID
 		s.Buttons[0].Action = func() {
@@ -69,6 +72,29 @@ func ShowWithin(m Message, limit time.Duration) (int, bool) {
 		i-- // the Copy button comes first
 	}
 	return i, timedOut
+}
+
+// PlainText is the whole message as text: for "Copy text" and for the
+// message-box fallback, which can't show items.
+func (m Message) PlainText() string {
+	var b strings.Builder
+	b.WriteString(m.Text)
+	for _, it := range m.Items {
+		if it.Heading {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n" + it.Title)
+		if it.Path != "" {
+			b.WriteString("\n    " + it.Path)
+		}
+		if it.Note != "" {
+			b.WriteString("\n" + it.Note)
+		}
+	}
+	if m.Footer != "" {
+		b.WriteString("\n\n" + m.Footer)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func (m Message) withDefaults(cfg config.Config) Message {
@@ -87,7 +113,7 @@ func Spec(m Message, cfg config.Config) popup.Spec {
 	m = m.withDefaults(cfg)
 	s := popup.Spec{
 		Severity: map[Kind]popup.Severity{KindInfo: popup.Info, KindSuccess: popup.OK, KindWarning: popup.Warning, KindError: popup.Critical}[m.Kind],
-		Brand:    m.Brand, Title: m.Heading, Body: strings.TrimSpace(m.Text),
+		Brand:    m.Brand, Title: m.Heading, Body: strings.TrimSpace(m.Text), Items: m.Items, Footer: m.Footer, Wide: m.Wide,
 		Accent: cfg.AccentColor, Logo: cfg.LogoPath(), OnHelp: m.Help,
 		Sound: cfg.PopupSound && (m.Kind == KindWarning || m.Kind == KindError),
 	}
@@ -102,7 +128,7 @@ func Spec(m Message, cfg config.Config) popup.Spec {
 
 // fallback shows m as a Windows message box (OK, or OK/Cancel for two buttons).
 func fallback(m Message, limit time.Duration) (int, bool) {
-	text := m.Text
+	text := m.PlainText()
 	if m.Heading != "" {
 		text = m.Heading + "\n\n" + text
 	}

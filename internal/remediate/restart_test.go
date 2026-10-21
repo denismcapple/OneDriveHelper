@@ -11,8 +11,10 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
+	"github.com/denismcapple/OneDriveHelper/internal/popup"
 )
 
 // fakeRestart replaces the restart environment and the dialogs. It records
@@ -46,9 +48,13 @@ func useFakeRestart(t *testing.T, f *fixture, fr *fakeRestart) {
 		recover: func(Target, *log.Logger) {},
 		plan:    func(Target, config.Config) (*Plan, error) { return f.plan, nil },
 		execute: Execute,
-		resync:  func([]onedrive.Orphan, *log.Logger) {},
+		resync:  func([]onedrive.Orphan, *log.Logger) string { return "" },
 		info:    show("info"), success: show("success"), warn: show("warn"), fail: show("fail"),
-		confirm: func(string, string) bool { return true },
+		confirm: func(string, []popup.Item, string) bool { return true },
+		result: func(m dialog.Message) {
+			kind := map[dialog.Kind]string{dialog.KindSuccess: "success", dialog.KindWarning: "warn"}[m.Kind]
+			fr.shown = append(fr.shown, kind+": "+m.Heading)
+		},
 		choose: func(h, _ string, _ []string, _ int) int {
 			fr.shown = append(fr.shown, "choose: "+h)
 			return fr.choice

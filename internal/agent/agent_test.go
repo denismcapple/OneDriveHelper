@@ -15,6 +15,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
+	"github.com/denismcapple/OneDriveHelper/internal/remediate"
 )
 
 func TestSnoozeState(t *testing.T) {
@@ -82,7 +83,7 @@ func TestOrphanGroups(t *testing.T) {
 		}
 	}
 	want := []string{
-		"# Stopped syncing (1)", "•  Projects - Documents",
+		"# Stopped syncing (2)", "•  Projects - Documents", "•  Marketing - Documents (click 'Sync' on its SharePoint page afterwards)",
 		`# Old copies: these libraries now sync to "AcmeCorp" (2)`, "•  Finance - Documents", "•  Sales - Documents",
 		"# From an account that is no longer connected (1)", "•  Bids Team - Documents",
 		"# Empty leftover folders (1)", "•  Contoso Ltd",
@@ -95,7 +96,7 @@ func TestOrphanGroups(t *testing.T) {
 		{Name: "A", Path: `C:\Users\d\Old\A`, Kind: onedrive.KindMoved, MovedTo: `C:\Users\d\One\A`},
 		{Name: "B", Path: `C:\Users\d\Old\B`, Kind: onedrive.KindMoved, MovedTo: `C:\Users\d\Two\B`},
 	}
-	if g := orphanGroups(moved); len(g) != 1 || g[0].heading != "Old copies: these libraries now sync to a new folder (2)" {
+	if g := remediate.Groups(moved); len(g) != 1 || g[0].Heading != "Old copies: these libraries now sync to a new folder (2)" {
 		t.Errorf("groups: %+v", g)
 	}
 }
@@ -109,12 +110,12 @@ func TestOrphanSpec(t *testing.T) {
 	}
 	var snoozed []string
 	s := orphanSpec(cfg, orphans, Actions{Snooze: func(id, d string) { snoozed = append(snoozed, id) }})
-	if s.Title != orphanTitle || s.Body != defaultOrphan ||
-		!strings.Contains(s.Footer, "and 1 more") || !strings.Contains(s.Footer, "Contoso Service Desk") {
+	// The Contact support button covers the support details: they aren't repeated in the text.
+	if s.Title != orphanTitle || s.Body != defaultOrphan || s.Footer != "…and 1 more." {
 		t.Errorf("title/body/footer: %q / %q / %q", s.Title, s.Body, s.Footer)
 	}
-	if len(s.Items) != maxListed+1 || !s.Items[0].Heading || s.Items[0].Title != "Stopped syncing (7)" ||
-		s.Items[1].Path != `C:\Users\d\Org\A` || s.Items[1].Title != "•  A" {
+	if len(s.Items) != maxListed+1 || !s.Items[0].Heading || s.Items[0].Title != "Stopped syncing (7)" || s.Items[0].Note != remediate.ActionResync ||
+		s.Items[1].Path != `C:\Users\d\Org\A` || s.Items[1].Title != "•  A (your support team will add it back)" || s.Items[1].Note != "" {
 		t.Errorf("items: %+v", s.Items)
 	}
 	empty := orphanSpec(cfg, []onedrive.Orphan{{Name: "Old", Path: `C:\Users\d\Old`, TenantRoot: `C:\Users\d\Old`, EmptyOrg: true}}, Actions{})
@@ -133,10 +134,14 @@ func TestOrphanSpec(t *testing.T) {
 		t.Errorf("ignore must apply to this alert only: %v", snoozed)
 	}
 	cfg.RemediationEnabled = false
-	for _, b := range orphanSpec(cfg, orphans, Actions{}).Buttons {
+	off := orphanSpec(cfg, orphans, Actions{})
+	for _, b := range off.Buttons {
 		if strings.Contains(b.Label, "Fix") {
 			t.Error("fix button shown although remediation disabled")
 		}
+	}
+	if off.Items[0].Note != "" {
+		t.Errorf("no 'We will...' line when fixing is turned off: %q", off.Items[0].Note)
 	}
 }
 

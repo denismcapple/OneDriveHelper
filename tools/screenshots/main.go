@@ -26,6 +26,7 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/agent"
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/popup"
+	"github.com/denismcapple/OneDriveHelper/internal/remediate"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
 
@@ -63,7 +64,8 @@ func main() {
 		log.Fatal(err)
 	}
 	winapi.EnableVisualStyles()
-	popup.ForceDPI = 144 // 1.5x for crisp images
+	popup.ForceDPI = 144          // 1.5x for crisp images
+	remediate.PreviewLinks = true // the made-up folders don't exist, but show their paths as links
 	ui, err := popup.Start()
 	if err != nil {
 		log.Fatal(err)

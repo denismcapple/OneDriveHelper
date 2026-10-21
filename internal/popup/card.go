@@ -64,8 +64,12 @@ type card struct {
 	scroll, scrollMax int32
 }
 
-// helpHit is the hover/click index of the header help link.
-const helpHit = -2
+// helpHit is the hover/click index of the header help link; item i's path
+// link is pathHit - i.
+const (
+	helpHit = -2
+	pathHit = -100
+)
 
 const helpLabel = "What does this mean?"
 
@@ -106,7 +110,11 @@ func (c *card) layout() {
 		}
 	}
 	wa := workArea()
-	c.w = min(max(m.s(440), need+2*pad), max(m.s(440), (wa.Right-wa.Left)*3/4))
+	minW := m.s(440)
+	if c.spec.Wide {
+		minW = m.s(600)
+	}
+	c.w = min(max(minW, need+2*pad), max(m.s(440), (wa.Right-wa.Left)*3/4))
 	inner := c.w - 2*pad
 
 	c.help = rect{}
@@ -139,28 +147,38 @@ func (c *card) layout() {
 	c.items = make([]itemRects, len(c.spec.Items))
 	for i, it := range c.spec.Items {
 		var r itemRects
-		font, left := m.fonts.item, pad+m.s(6)
-		if it.Heading {
+		font, left, pathLeft := m.fonts.item, pad+m.s(6), pad+indent
+		switch {
+		case it.Heading:
 			font, left = m.fonts.heading, pad
 			y += m.s(14)
-		} else {
+		case it.Plain:
+			font, left, pathLeft = m.fonts.body, pad, pad
+			y += m.s(12)
+		default:
 			y += m.s(7)
 		}
 		_, h := measure(font, it.Title, pad+inner-left, dtWordBreak|dtEditControl)
 		r.title = rect{Left: left, Top: y, Right: pad + inner, Bottom: y + h}
 		y += h
 		if it.Heading {
+			if it.Note != "" {
+				_, h = measure(m.fonts.item, it.Note, inner, dtWordBreak|dtEditControl)
+				r.note = rect{Left: pad, Top: y + m.s(2), Right: pad + inner, Bottom: y + m.s(2) + h}
+				y += h + m.s(2)
+			}
 			c.items[i] = r
 			continue
 		}
 		if it.Path != "" {
-			_, h = measure(m.fonts.small, it.Path, inner-indent, dtSingleLine)
-			r.path = rect{Left: pad + indent, Top: y + m.s(1), Right: pad + inner, Bottom: y + m.s(1) + h}
+			w, h := measure(m.fonts.small, it.Path, pad+inner-pathLeft, dtSingleLine)
+			// The link is only as wide as the text, so clicking beside it does nothing.
+			r.path = rect{Left: pathLeft, Top: y + m.s(1), Right: pathLeft + min(w, pad+inner-pathLeft), Bottom: y + m.s(1) + h}
 			y += h + m.s(2)
 		}
 		if it.Note != "" {
-			_, h = measure(m.fonts.item, it.Note, inner-indent, dtWordBreak|dtEditControl)
-			r.note = rect{Left: pad + indent, Top: y + m.s(2), Right: pad + inner, Bottom: y + m.s(2) + h}
+			_, h = measure(c.noteFont(it), it.Note, pad+inner-pathLeft, dtWordBreak|dtEditControl)
+			r.note = rect{Left: pathLeft, Top: y + m.s(2), Right: pad + inner, Bottom: y + m.s(2) + h}
 			y += h + m.s(2)
 		}
 		c.items[i] = r
@@ -226,6 +244,18 @@ func (c *card) layout() {
 		c.scrollMax = max(contentEnd+m.s(10)-bottom, 0)
 	}
 	c.scroll = min(max(c.scroll, 0), c.scrollMax)
+}
+
+// noteFont: a heading's note is a line of text; a folder's note is small
+// print (like its path) unless it is strong.
+func (c *card) noteFont(it Item) uintptr {
+	switch {
+	case it.StrongNote:
+		return c.m.fonts.itemBold
+	case it.Heading:
+		return c.m.fonts.item
+	}
+	return c.m.fonts.small
 }
 
 // scrollBy scrolls the middle of a tall card (mouse wheel).
@@ -325,21 +355,37 @@ func (c *card) paint(target uintptr) {
 	for i, it := range c.spec.Items {
 		r := c.items[i]
 		r.title, r.path, r.note = off(r.title), off(r.path), off(r.note)
-		if it.Heading {
+		switch {
+		case it.Heading:
 			call(pSelectObject, dc, m.fonts.heading)
-		} else {
+			call(pSetTextColor, dc, colorTitle)
+		case it.Plain:
+			call(pSelectObject, dc, m.fonts.body)
+			call(pSetTextColor, dc, colorBody)
+		default:
 			call(pSelectObject, dc, m.fonts.item)
+			call(pSetTextColor, dc, colorTitle)
 		}
-		call(pSetTextColor, dc, colorTitle)
 		drawText(dc, it.Title, &r.title, dtWordBreak|dtEditControl|dtNoPrefix)
 		if it.Path != "" {
 			call(pSelectObject, dc, m.fonts.small)
-			call(pSetTextColor, dc, colorPath)
+			color := colorPath
+			if it.Open != nil { // a link: always underlined, accent colour on hover
+				if c.hover == pathHit-i {
+					color, _ = accent(c.spec.Accent)
+				}
+				fill(dc, rect{Left: r.path.Left, Top: r.path.Bottom - m.s(1), Right: r.path.Right, Bottom: r.path.Bottom}, color)
+			}
+			call(pSetTextColor, dc, color)
 			drawText(dc, it.Path, &r.path, dtSingleLine|dtNoPrefix|dtPathEllipsis)
 		}
 		if it.Note != "" {
-			call(pSelectObject, dc, m.fonts.item)
-			call(pSetTextColor, dc, colorBody)
+			call(pSelectObject, dc, c.noteFont(it))
+			if it.Heading || it.StrongNote {
+				call(pSetTextColor, dc, colorBody)
+			} else {
+				call(pSetTextColor, dc, colorPath)
+			}
 			drawText(dc, it.Note, &r.note, dtWordBreak|dtEditControl|dtNoPrefix)
 		}
 	}
@@ -400,6 +446,14 @@ func (c *card) hit(lParam uintptr) int {
 			return i
 		}
 	}
+	// Path links scroll with the middle of the card, and only count where it's visible.
+	if c.scrollMax == 0 || c.view.Contains(x, y) {
+		for i, it := range c.spec.Items {
+			if it.Open != nil && i < len(c.items) && c.items[i].path.Contains(x, y+c.scroll) {
+				return pathHit - i
+			}
+		}
+	}
 	return -1
 }
 
@@ -414,6 +468,12 @@ func (c *card) click(i int) {
 	if i == helpHit {
 		if f := c.spec.OnHelp; f != nil {
 			go safeRun(f)
+		}
+		return
+	}
+	if i <= pathHit {
+		if n := pathHit - i; n < len(c.spec.Items) && c.spec.Items[n].Open != nil {
+			go safeRun(c.spec.Items[n].Open)
 		}
 		return
 	}

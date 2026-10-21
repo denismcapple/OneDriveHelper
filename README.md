@@ -2,9 +2,11 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.10.1** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.10.2** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> **Latest update (0.10.1): old copies are now recognised even when the tool was installed after the rename**, by matching the folder name with the libraries OneDrive knows about. In 0.10.0 those showed as "Stopped syncing".
+> **Latest update (0.10.2): simpler, clearer messages.** Every card now says each thing once: what's wrong, then one line per group saying what the fix will do, then each folder's name with its path once in small print. Folder paths are underlined: click one to open it in Explorer. The fix result is a single card that lists only the folders that couldn't be fixed, with what stopped them in bold. The administrator approval is laid out the same way, with each folder's size in small print.
+>
+> **0.10.1:** old copies are recognised even when the tool was installed after the rename, by matching the folder name with the libraries OneDrive knows about.
 >
 > **0.10.0: it tells old copies apart from libraries that have really stopped.** When an organisation is renamed or an account is added again, OneDrive starts syncing the same libraries into a new folder and leaves the old ones behind. The tool now checks what OneDrive is actually syncing, and groups the folders it finds: **stopped syncing**, **old copies** (the same library now syncs to a new folder), **from an account that is no longer connected**, and **empty leftover folders**. Old copies and folders from disconnected accounts are still saved and removed by the fix, but never synced again. The alert is clearer too: the warning comes first and the folder list is smaller. Tested on Remote Desktop (RDS) session hosts, including finishing a fix on a different host. See [How broken folders are spotted](#how-broken-folders-are-spotted).
 
@@ -59,12 +61,14 @@ A few rules keep this sensible:
 
 <img src="docs/images/alert-folders-not-syncing.png" width="477" alt="Problems found with your OneDrive / SharePoint sync alert">
 
-The warning comes first. The folders are listed below it in groups, so the user (and you) can see at a glance what happened to each one:
+The warning comes first. The folders are listed below it in groups, each with one line saying what the fix will do, so the user (and you) can see at a glance what happened:
 
-* **Stopped syncing**: OneDrive has dropped the library, but the account is still connected. The fix syncs it again.
-* **Old copies**: the same library now syncs to a new folder, shown in the heading (typically after the organisation was renamed or the account was added again). The fix saves the files from the old copy and removes it.
-* **From an account that is no longer connected**: the fix saves the files and removes the folder.
-* **Empty leftover folders**: organisation folders with nothing in them; the fix just removes them.
+* **Stopped syncing**: OneDrive has dropped the library, but the account is still connected. *"We will back up these files & folders, then try to sync them again."*
+* **Old copies**: the same library now syncs to a new folder, shown in the heading (typically after the organisation was renamed or the account was added again). *"We will move these files & folders to a backup folder."*
+* **From an account that is no longer connected**: *"We will move these files & folders to a backup folder."*
+* **Empty leftover folders**: organisation folders with nothing in them. *"We will remove these empty folders."*
+
+Each folder is listed by name, with its path below in small print. The path is underlined: click it to open the folder in Explorer. A short note follows the name only where the group's line doesn't fully apply, for example *(click 'Sync' on its SharePoint page afterwards)* when a library can't be reconnected automatically.
 
 The alerts appear in the bottom right corner of the screen. They're deliberately not Windows notifications, so they don't get lost among everything else:
 
@@ -84,7 +88,7 @@ Questions and messages (the fix confirmation and its result, the administrator a
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.1 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.2 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -99,12 +103,13 @@ Hover over it to see the version and a one-line summary, for example "AcmeCorp -
 
 Fixing a broken folder means deleting it from the PC, so we were careful:
 
-1. **The user confirms.** They're told which folders will be fixed and, for each one, whether it will be reconnected automatically, by hand, or not at all (old copies and folders from disconnected accounts).
+1. **The user confirms.** They see the same groups as the alert, where their files will be saved, and that nothing is deleted until a copy is saved.
 2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it. If nobody answers within 15 minutes, the user is told nothing changed (event 5010); the approval window closes itself after 10 minutes, and a late approval does nothing.
 3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told which program to close (for example "Microsoft Excel has a file in it open") and to try again; other folders carry on. If every folder was skipped, the user is told plainly that nothing was changed. See [When files are locked](#when-files-are-locked) for the restart option.
 4. **Files are saved.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts. Each copy is written to disk, its size checked, and the original is confirmed unchanged while it was being read.
 5. **Only proven copies are deleted.** Before deleting anything, every file is checked again: it must have been copied in this run and be unchanged since, and nothing may have it open for writing. If even one file doesn't pass (or anything new appeared), nothing is deleted and the folder is put back where it was. If OneDrive has started syncing the old location again in the meantime, both copies are kept. A `manifest.json` records every step, before it happens.
-6. **OneDrive is asked to sync the library again**, for folders that were fully fixed. Where the library details are known, that's automatic. Otherwise the library's web page opens so the user can click Sync. The leftover shortcuts in Explorer's side panel are cleaned up too.
+6. **OneDrive is asked to sync the library again**, for folders that were fully fixed (not for old copies or folders from disconnected accounts). Where the library details are known, that's automatic. Otherwise the library's web page opens so the user can click Sync. The leftover shortcuts in Explorer's side panel are cleaned up too.
+7. **The user sees one result card.** It says how many folders were moved to the backup folder, lists any folder that couldn't be fixed with its path and what stopped it (in bold, for example **Microsoft Excel has a file in it open**), says which libraries OneDrive was asked to sync again, and links to the saved files.
 
 If the fix is interrupted (a crash, a power cut, the user signing out), the record on disk points at the user's files. The next time the user part starts it either puts the folder back, or reports it once in the status window and in the event log (5007) so you can sort it out. Recovery only ever runs as the user, never with admin rights.
 
@@ -307,15 +312,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.1; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.2; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.10.1'
+$Version = 'v0.10.2'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = 'A512F89B8E15D56DCD555C71D1217B9AC0CF8543B67A17E998E58532262904A9'
-    'arm64' = 'FC22D2A0FEDB11B7FCA6E1C9A7976B4ABD1099590FC3F9A47AA159158FAD8941'
+    'x64'   = '0756AA98EAC399B32CA33846F45DA1409567550E2ECA1F57C6563FA88E853E99'
+    'arm64' = '1CC23EFB7D4B27A0C6A8F33471033645B1BA6B2EA1D9D2EDB56DC65CD51807D1'
 }
 $Settings = @'
 {

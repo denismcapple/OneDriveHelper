@@ -142,7 +142,11 @@ func offerRestart(cfg config.Config, t Target, res *Result, lg *log.Logger, atte
 		heading, buttons, how = "Sign out to finish the fix?", []string{"Not now", "Sign out later", "Sign out now"},
 			"Signing out closes your programs. When you sign in again, on this computer or any other one you use, OneDrive Helper finishes the fix by itself before you open anything."
 	}
-	text := resultMessage(res, cfg) + "\n\nThese folders could not be fixed because files in them are in use:\n• " + strings.Join(locked, "\n• ") +
+	skip := map[string]bool{}
+	for _, p := range locked {
+		skip[onedrive.Clean(p)] = true
+	}
+	text := strings.TrimSpace(resultText(res, "", skip)+"\n\nThese folders could not be fixed because files in them are in use:\n• "+strings.Join(locked, "\n• ")) +
 		"\n\n" + how + " No administrator is needed again.\n\nSave your work and close your programs first."
 	choice := flow.choose(heading, text, buttons, 2)
 	if choice < 1 {

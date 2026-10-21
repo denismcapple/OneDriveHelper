@@ -151,6 +151,20 @@ func ShellOpen(target string) error {
 	return windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL)
 }
 
+// OpenFolder opens an existing folder in Explorer. Anything that isn't a
+// plain folder (a file, a missing path, a link) is refused, so a path can
+// never start a program.
+func OpenFolder(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is not a folder", path)
+	}
+	return ShellOpen(path)
+}
+
 type shellExecuteInfo struct {
 	cbSize       uint32
 	fMask        uint32

@@ -265,7 +265,7 @@ func TestExecuteSkipsFolderWithOpenFile(t *testing.T) {
 	if res.Changed() {
 		t.Error("a run that only skipped changed nothing")
 	}
-	msg := resultMessage(res, config.Defaults())
+	msg := resultMessage(res, config.Defaults(), "").PlainText()
 	if !strings.Contains(msg, "exactly where they were") || strings.Contains(msg, "saved files are in") {
 		t.Errorf("message: %q", msg)
 	}

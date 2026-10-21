@@ -11,6 +11,7 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
+	"github.com/denismcapple/OneDriveHelper/internal/popup"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
 
@@ -104,9 +105,9 @@ func TestPanicDuringExecuteReleasesLockAndIsRecoverable(t *testing.T) {
 		return ExitApproved, nil, done
 	}
 	resynced := false
-	flow.resync = func([]onedrive.Orphan, *log.Logger) { resynced = true }
+	flow.resync = func([]onedrive.Orphan, *log.Logger) string { resynced = true; return "" }
 	flow.info, flow.warn, flow.fail = func(string, string) {}, func(string, string) {}, func(string, string) {}
-	flow.confirm = func(string, string) bool { return true }
+	flow.confirm = func(string, []popup.Item, string) bool { return true }
 	func() {
 		defer func() { recover() }()
 		UserFlow("agent.exe", discard, func(bool) {}, func() bool { return false })
@@ -139,35 +140,128 @@ func TestConfirmationForFoldersThatAreNotResynced(t *testing.T) {
 	if !strings.Contains(ResyncNote(moved), moved.MovedTo) || !strings.Contains(ResyncNote(gone), "no longer connected") {
 		t.Errorf("notes: %q / %q", ResyncNote(moved), ResyncNote(gone))
 	}
-	if p := (&Plan{Items: []Item{{Orphan: moved}}}).Summary(); !strings.Contains(p, "will not be re-synced") {
-		t.Errorf("approval summary: %s", p)
+	plan := &Plan{Target: Target{UserName: "d"}, BackupDir: `C:\Users\d\ODHelper\Saved`,
+		Items: []Item{{Orphan: moved, Stats: Stats{LocalFiles: 9, LocalBytes: 4 << 20}}, {Orphan: stopped}}}
+	p := plan.Summary()
+	for _, want := range []string{"Old copies: these libraries now sync to \"New\" (1)", ActionBackup, moved.Path, "9 file(s)",
+		"Stopped syncing (1)", ActionResync} {
+		if !strings.Contains(p, want) {
+			t.Errorf("summary missing %q:\n%s", want, p)
+		}
+	}
+	// The approval card: section headers, then each folder's name with its
+	// path and size in small print. "Now syncs to" isn't repeated per folder.
+	a := plan.ApprovalMessage()
+	var lines []string
+	for _, it := range a.Items {
+		lines = append(lines, it.Title+"|"+it.Path+"|"+it.Note)
+	}
+	got := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"Old copies: these libraries now sync to \"New\" (1)||" + ActionBackup,
+		"•  Internal - Documents|" + moved.Path + "|9 files on this PC (4.0 MB)",
+		"Files will be saved to|" + plan.BackupDir + "|",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("approval items missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(a.PlainText(), "now syncs to") || a.Text != "User: d" || a.Buttons[1] != "Approve" {
+		t.Errorf("approval card:\n%s", a.PlainText())
 	}
 
-	confirmation := func(orphans ...onedrive.Orphan) string {
+	confirmation := func(orphans ...onedrive.Orphan) ([]popup.Item, string) {
 		saved := flow
 		defer func() { flow = saved }()
 		var items []Item
 		for _, o := range orphans {
 			items = append(items, Item{Orphan: o})
 		}
-		text := ""
+		var shown []popup.Item
+		footer := ""
 		flow = flowEnv{
 			target:  func() (Target, error) { return Target{UserName: "d", SID: "S-1-5-21-1"}, nil },
 			recover: func(Target, *log.Logger) {},
 			plan: func(Target, config.Config) (*Plan, error) {
-				return &Plan{Items: items, FreeBytes: 10, Required: 1}, nil
+				return &Plan{Items: items, FreeBytes: 10, Required: 1, BackupDir: `C:\Users\d\ODHelper\Saved`}, nil
 			},
-			confirm: func(_, m string) bool { text = m; return false },
+			confirm: func(_ string, it []popup.Item, f string) bool { shown, footer = it, f; return false },
 			warn:    func(string, string) {}, fail: func(string, string) {}, info: func(string, string) {},
 		}
 		UserFlow("agent.exe", discard, func(bool) {}, func() bool { return false })
-		return text
+		return shown, footer
 	}
-	if c := confirmation(moved, gone); c == "" || strings.Contains(c, "sync the libraries again") {
-		t.Errorf("no re-sync step expected:\n%s", c)
+	items, footer := confirmation(moved, gone)
+	var notes []string
+	for _, it := range items {
+		if it.Heading {
+			notes = append(notes, it.Note)
+		}
 	}
-	if c := confirmation(moved, stopped); !strings.Contains(c, "3. Ask OneDrive to sync the libraries again") {
-		t.Errorf("re-sync step expected for the stopped library:\n%s", c)
+	last := items[len(items)-1]
+	if strings.Join(notes, "|") != ActionBackup+"|"+ActionBackup || last.Title != "Your files are saved to" || !last.Plain ||
+		last.Path != `C:\Users\d\ODHelper\Saved` || footer != "Nothing is deleted until a copy is saved.\nAn administrator needs to approve this." {
+		t.Errorf("confirmation: %v / %+v / %q", notes, last, footer)
+	}
+	if items, _ := confirmation(moved, stopped); items[0].Note != ActionResync {
+		t.Errorf("re-sync expected for the stopped library: %+v", items)
+	}
+}
+
+// Each folder is listed once: its name, and its path as a link that opens
+// it, as long as the folder exists.
+func TestItemsListEachFolderOnceWithAnOpenLink(t *testing.T) {
+	savedOpen, savedExists := openFolder, folderExists
+	defer func() { openFolder, folderExists = savedOpen, savedExists }()
+	var opened []string
+	openFolder = func(p string) { opened = append(opened, p) }
+	folderExists = func(p string) bool { return !strings.HasSuffix(p, `\A - Documents`) }
+	items, more := Items([]onedrive.Orphan{
+		{Name: "A - Documents", Path: `C:\Users\d\Org\A - Documents`, Kind: onedrive.KindStopped, WebURL: "https://org.sharepoint.com/sites/a"},
+		{Name: "B - Documents", Path: `C:\Users\d\Org\B - Documents`, Kind: onedrive.KindStopped},
+		{Name: "Docs", Path: `C:\Users\d\Org\Docs`, KnownFolders: []string{"Documents"}},
+	}, 2)
+	if len(items) != 3 || !items[0].Heading || items[0].Note != ActionResync || more != "…and 1 more." {
+		t.Fatalf("items: %+v %q", items, more)
+	}
+	if items[1].Title != "•  A - Documents (click 'Sync' on its SharePoint page afterwards)" || items[1].Note != "" ||
+		items[2].Title != "•  B - Documents (your support team will add it back)" {
+		t.Errorf("exceptions: %q / %q", items[1].Title, items[2].Title)
+	}
+	if items[1].Open != nil {
+		t.Error("a folder that doesn't exist is not a link")
+	}
+	items[2].Open()
+	if len(opened) != 1 || opened[0] != `C:\Users\d\Org\B - Documents` {
+		t.Errorf("opened %v", opened)
+	}
+}
+
+func TestResultMessage(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.SupportName = "the Service Desk"
+	ok := &Result{RunDir: `C:\Users\d\ODHelper\Saved\2026-10-21_1401`, Outcomes: []Outcome{
+		{Path: `C:\Users\d\Org\A`, State: StateDone, Removed: true}, {Path: `C:\Users\d\Org\B`, State: StateDone, Removed: true}}}
+	m := resultMessage(ok, cfg, resyncText([]string{"A"}, nil, nil))
+	if m.Heading != "Folders fixed" || m.Text != "2 folders were moved to your backup folder." || m.Footer != "" || len(m.Items) != 2 ||
+		m.Items[0].Title != "OneDrive has been asked to sync A again (confirm if it asks)." ||
+		m.Items[1].Title != "Your saved files are in" || m.Items[1].Path != ok.RunDir {
+		t.Errorf("success card: %+v", m)
+	}
+	part := &Result{RunDir: ok.RunDir, Outcomes: []Outcome{
+		{Path: `C:\Users\d\Org\A`, State: StateDone, Removed: true},
+		{Path: `C:\Users\d\Org\B`, State: StateSkipped, Error: "Microsoft Excel has a file in it open"}}}
+	m = resultMessage(part, cfg, "")
+	b := m.Items[0]
+	if m.Text != "1 folder was moved to your backup folder." || b.Title != "•  B - not changed" || b.Path != `C:\Users\d\Org\B` ||
+		b.Note != "Microsoft Excel has a file in it open" || !b.StrongNote || !strings.Contains(m.Footer, "the Service Desk") {
+		t.Errorf("partial card: %+v", m)
+	}
+	if strings.Contains(m.PlainText(), `C:\Users\d\Org\A`) {
+		t.Errorf("fixed folders are counted, not listed:\n%s", m.PlainText())
+	}
+	if got := joinNames([]string{"A", "B", "C"}); got != "A, B and C" {
+		t.Errorf("joinNames: %q", got)
 	}
 }
 
@@ -195,11 +289,11 @@ func TestUserFlowApprovalTimeout(t *testing.T) {
 			executed = true
 			return &Result{}, nil
 		},
-		resync:  func([]onedrive.Orphan, *log.Logger) {},
+		resync:  func([]onedrive.Orphan, *log.Logger) string { return "" },
 		info:    func(_, m string) { mu.Lock(); infos = append(infos, m); mu.Unlock() },
 		warn:    func(_, m string) {},
 		fail:    func(_, m string) {},
-		confirm: func(string, string) bool { return true },
+		confirm: func(string, []popup.Item, string) bool { return true },
 	}
 	done := make(chan struct{})
 	go func() {

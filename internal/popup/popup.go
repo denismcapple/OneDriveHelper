@@ -41,10 +41,18 @@ type Button struct {
 // Item is one listed problem: a title, an optional path on its own line in a
 // smaller grey font, and an optional explanatory note. The list is drawn
 // smaller than the card's title and text, so those stand out. An Item with
-// Heading set is a group heading (bold, Title only).
+// Heading set is a group heading: a bold Title, with Note below it.
 type Item struct {
 	Title, Path, Note string
 	Heading           bool
+	// Plain draws Title like the card's text (e.g. "Your files are saved to"),
+	// with Path directly below it.
+	Plain bool
+	// StrongNote draws Note in bold (e.g. what stopped a folder being fixed).
+	StrongNote bool
+	// Open, if set, makes Path a link (underlined); clicking it runs Open on
+	// its own goroutine.
+	Open func()
 }
 
 // Spec describes a card. Showing a Spec with an existing ID updates that card.
@@ -61,6 +69,7 @@ type Spec struct {
 	Accent   string // "#RRGGBB" for primary buttons and Info headers; empty = default blue
 	OnHelp   func() // if set, the header shows "What does this mean? (i)" which calls this
 	Logo     string // PNG file shown above the title (skipped if missing or unusable)
+	Wide     bool   // at least 600 instead of 440 pixels wide (e.g. lists of long paths)
 }
 
 // Manager owns the UI thread and all cards.
@@ -81,7 +90,7 @@ type Manager struct {
 	logos  map[string]logoEntry
 }
 
-type fonts struct{ brand, title, body, button, small, heading, item uintptr }
+type fonts struct{ brand, title, body, button, small, heading, item, itemBold uintptr }
 
 var (
 	wndProcCB   uintptr
@@ -143,13 +152,14 @@ func (m *Manager) loop(ready chan<- error) {
 		m.dpi = ForceDPI
 	}
 	m.fonts = fonts{
-		brand:   createFont(m.s(12), 600),
-		title:   createFont(m.s(17), 600),
-		body:    createFont(m.s(14), 400),
-		button:  createFont(m.s(14), 600),
-		small:   createFont(m.s(11), 400), // item paths
-		heading: createFont(m.s(13), 600), // item group headings
-		item:    createFont(m.s(12), 400), // item titles and notes
+		brand:    createFont(m.s(12), 600),
+		title:    createFont(m.s(17), 600),
+		body:     createFont(m.s(14), 400),
+		button:   createFont(m.s(14), 600),
+		small:    createFont(m.s(11), 400), // item paths
+		heading:  createFont(m.s(13), 600), // item group headings
+		item:     createFont(m.s(12), 400), // item titles and notes
+		itemBold: createFont(m.s(12), 600), // strong item notes
 	}
 	ready <- nil
 

@@ -16,6 +16,7 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
+	"github.com/denismcapple/OneDriveHelper/internal/popup"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
 )
 
@@ -118,8 +119,8 @@ func RunApproval(sid string, deadline time.Time) int {
 	}
 	admin := winapi.CurrentUserName()
 	code, event := decideApproval(deadline, time.Now, func(limit time.Duration) (bool, bool) {
-		return dialog.ConfirmWithin("Administrator approval: fix these folders?", plan.Summary()+
-			"\nFiles stored on this PC are saved first; then the broken folders are removed and OneDrive is asked to sync the libraries again.", "Approve", limit)
+		i, timedOut := dialog.ShowWithin(plan.ApprovalMessage(), limit)
+		return i == 1, timedOut
 	})
 	switch event {
 	case elog.ApprovalTimedOut:
@@ -156,12 +157,15 @@ type flowEnv struct {
 	plan    func(t Target, cfg config.Config) (*Plan, error)
 	elevate func(exe string, args []string, deadline time.Time) (uint32, error, <-chan struct{})
 	execute func(p *Plan, lg *log.Logger, ev *elog.Log, stop func() bool) (*Result, error)
-	resync  func(orphans []onedrive.Orphan, lg *log.Logger)
+	resync  func(orphans []onedrive.Orphan, lg *log.Logger) string
 	info    func(heading, text string)
 	success func(heading, text string)
 	warn    func(heading, text string)
 	fail    func(heading, text string)
-	confirm func(heading, text string) bool
+	// confirm asks whether to fix the listed folders; footer follows the list.
+	confirm func(heading string, items []popup.Item, footer string) bool
+	// result shows the outcome of a fix.
+	result func(m dialog.Message)
 	// choose shows buttons (primary = accent button) and returns the index clicked.
 	choose func(heading, text string, buttons []string, primary int) int
 }
@@ -182,7 +186,11 @@ func defaultFlowEnv() flowEnv {
 		success: dialog.Success,
 		warn:    dialog.Warn,
 		fail:    dialog.Error,
-		confirm: func(heading, text string) bool { return dialog.Confirm(heading, text, "Continue") },
+		confirm: func(heading string, items []popup.Item, footer string) bool {
+			return dialog.Show(dialog.Message{Heading: heading, Items: items, Footer: footer, Kind: dialog.KindWarning,
+				Buttons: []string{"Cancel", "Continue"}, Primary: 1}) == 1
+		},
+		result: func(m dialog.Message) { dialog.Show(m) },
 		choose: func(heading, text string, buttons []string, primary int) int {
 			return dialog.Show(dialog.Message{Heading: heading, Text: text, Kind: dialog.KindWarning, Buttons: buttons, Primary: primary})
 		},
@@ -244,26 +252,9 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		flow.fail("Not enough disk space", "There is not enough free disk space to safely save your files first.\n\n"+plan.Summary()+"\n"+cfg.SupportContact())
 		return
 	}
-	var list strings.Builder
-	resync, manual := false, false
-	for _, it := range plan.Items {
-		list.WriteString("• " + it.Orphan.DisplayName() + "\n    " + ResyncNote(it.Orphan) + "\n")
-		resync = resync || it.Orphan.NeedsResync()
-		manual = manual || (it.Orphan.NeedsResync() && !it.Orphan.CanResync())
-	}
-	step3 := ""
-	switch {
-	case manual:
-		step3 = "  3. Ask OneDrive to sync the libraries again. Where that can't be done automatically\n" +
-			"      (see above), you will need to click 'Sync' on the library's web page.\n"
-	case resync:
-		step3 = "  3. Ask OneDrive to sync the libraries again\n"
-	}
-	if !flow.confirm("Fix these folders?", "These folders are no longer syncing with OneDrive:\n\n"+list.String()+
-		"\nThe fix will:\n  1. Save a copy of the files stored on this PC to "+plan.BackupDir+"\n"+
-		"  2. Remove the broken folders\n"+step3+"\n"+
-		"An administrator must approve this. Your support team may need to enter their credentials.\n\n"+
-		"If you are unsure, stop here. "+cfg.SupportContact()) {
+	items, _ := Items(plan.Orphans(), 0)
+	items = append(items, savedTo("Your files are saved to", plan.BackupDir))
+	if !flow.confirm("Fix these folders?", items, "Nothing is deleted until a copy is saved.\nAn administrator needs to approve this.") {
 		return
 	}
 	deadline := time.Now().Add(approvalDeadline)
@@ -329,15 +320,6 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 func afterExecute(t Target, cfg config.Config, plan *Plan, res *Result, lg *log.Logger, attempts int, appr approvalInfo) {
 	lg.Printf("result:\n%s", res.Text())
 	handled := attempts < maxRestartAttempts && offerRestart(cfg, t, res, lg, attempts, appr)
-	switch {
-	case handled:
-	case res.OK():
-		flow.success("Folders fixed", resultMessage(res, cfg))
-	case !res.Changed():
-		flow.warn("Nothing was changed", resultMessage(res, cfg))
-	default:
-		flow.warn("The fix was only partly completed", resultMessage(res, cfg))
-	}
 	// Re-sync only folders that were fully fixed: rebuilding a library over a
 	// folder that was put back or kept in staging would mix them up.
 	done := res.Done()
@@ -347,25 +329,89 @@ func afterExecute(t Target, cfg config.Config, plan *Plan, res *Result, lg *log.
 			orphans = append(orphans, it.Orphan)
 		}
 	}
-	flow.resync(orphans, lg)
+	synced := flow.resync(orphans, lg)
+	switch {
+	case handled:
+		if synced != "" {
+			flow.info("Syncing the libraries again", synced)
+		}
+	default:
+		flow.result(resultMessage(res, cfg, synced))
+	}
 }
 
-// resultMessage is what the user is told after a fix. It only mentions the
-// backup folder when something was actually saved there.
-func resultMessage(res *Result, cfg config.Config) string {
-	var s string
+// resultMessage is the card shown after a fix: how many folders were fixed;
+// each folder that wasn't, with its path and (in bold) what stopped it; what
+// was re-synced; and where the saved files are (only when something was saved).
+func resultMessage(res *Result, cfg config.Config, synced string) dialog.Message {
+	m := dialog.Message{Heading: "Folders fixed", Kind: dialog.KindSuccess}
 	switch {
-	case res.OK():
-		return res.Text() + "\nYour saved files are in:\n" + res.RunDir
 	case !res.Changed():
-		s = res.Text() + "\nYour folders are exactly where they were. " + cfg.SupportContact()
-	default:
-		s = res.Text() + "\nA copy of the files that were saved is in:\n" + res.RunDir + "\n\n" + cfg.SupportContact()
+		m = dialog.Message{Heading: "Nothing was changed", Kind: dialog.KindWarning, Copy: true, Text: "Your folders are exactly where they were."}
+	case !res.OK():
+		m = dialog.Message{Heading: "The fix was only partly completed", Kind: dialog.KindWarning, Copy: true}
+	}
+	if n := res.fixed(); n > 0 {
+		m.Text = plural(n, "folder was", "folders were") + " moved to your backup folder."
+	}
+	for _, o := range res.Outcomes {
+		if o.State == StateDone {
+			continue
+		}
+		what, where := o.userState()
+		m.Items = append(m.Items, popup.Item{Title: "•  " + filepath.Base(o.Path) + " - " + what, Path: where, Open: link(where),
+			Note: o.blocker(), StrongNote: true})
+	}
+	if synced != "" {
+		m.Items = append(m.Items, popup.Item{Title: synced, Plain: true})
+	}
+	if res.RunDir != "" && res.Changed() {
+		m.Items = append(m.Items, savedTo("Your saved files are in", res.RunDir))
+	}
+	if !res.OK() {
+		m.Footer = cfg.SupportContact()
 	}
 	if res.Report != "" {
-		s += "\n\nFor your support team, the details are in:\n" + res.Report
+		m.Footer = strings.TrimSpace(m.Footer + "\n\nFor your support team, the details are in:\n" + res.Report)
 	}
-	return s
+	return m
+}
+
+// resultText is a plain-text version for the restart prompt, leaving out
+// the folders in skip (the locked ones, which the prompt lists itself).
+func resultText(res *Result, synced string, skip map[string]bool) string {
+	var b strings.Builder
+	fixed := res.fixed()
+	var problems []string
+	for _, o := range res.Outcomes {
+		if o.State != StateDone && !skip[onedrive.Clean(o.Path)] {
+			what, _ := o.userState()
+			line := "• " + filepath.Base(o.Path) + ": " + what
+			if why := o.blocker(); why != "" {
+				line += " (" + why + ")"
+			}
+			problems = append(problems, line)
+		}
+	}
+	if fixed > 0 {
+		fmt.Fprintf(&b, "%s moved to your backup folder.\n", plural(fixed, "folder was", "folders were"))
+	}
+	if len(problems) > 0 {
+		if fixed > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.Join(problems, "\n") + "\n")
+	}
+	if synced != "" {
+		b.WriteString("\n" + synced + "\n")
+	}
+	if res.RunDir != "" && res.Changed() {
+		b.WriteString("\nYour saved files are in:\n" + res.RunDir + "\n")
+	}
+	if !res.Changed() {
+		b.WriteString("\nYour folders are exactly where they were.\n")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 const notStarted = "OneDrive Helper is being updated or stopped, so the fix was not started. No changes were made. Please try again in a few minutes."
@@ -390,9 +436,9 @@ func ResyncNote(o onedrive.Orphan) string {
 	}
 }
 
-// Resync asks OneDrive to sync again every orphan whose folder is gone.
-func Resync(orphans []onedrive.Orphan, lg *log.Logger) {
-	cfg := config.Load()
+// Resync asks OneDrive to sync again every orphan whose folder is gone, and
+// returns what to tell the user ("" if nothing was re-synced).
+func Resync(orphans []onedrive.Orphan, lg *log.Logger) string {
 	ev := elog.Open()
 	defer ev.Close()
 	var auto, manual, none []string
@@ -406,31 +452,52 @@ func Resync(orphans []onedrive.Orphan, lg *log.Logger) {
 			lg.Printf("resync %s via %s", o.Path, u)
 			if err := winapi.ShellOpen(u); err != nil {
 				lg.Printf("resync %s: %v", o.Path, err)
-				none = append(none, o.DisplayName())
+				none = append(none, o.Name)
 				continue
 			}
-			auto = append(auto, o.DisplayName())
+			auto = append(auto, o.Name)
 			time.Sleep(3 * time.Second) // let OneDrive process one request at a time
 		case o.WebURL != "":
 			_ = winapi.ShellOpen(o.WebURL)
-			manual = append(manual, o.DisplayName())
+			manual = append(manual, o.Name)
 		default:
-			none = append(none, o.DisplayName())
+			none = append(none, o.Name)
 		}
 	}
 	if len(auto)+len(manual)+len(none) == 0 {
-		return
+		return ""
 	}
 	ev.Info(elog.ResyncRequested, fmt.Sprintf("Re-sync requested. Automatic: %v; manual: %v; unknown: %v", auto, manual, none))
-	var b strings.Builder
+	return resyncText(auto, manual, none)
+}
+
+// resyncText tells the user, in one line per case, what happened to the
+// libraries that should sync again.
+func resyncText(auto, manual, none []string) string {
+	var lines []string
 	if len(auto) > 0 {
-		b.WriteString("OneDrive has been asked to sync these libraries again (confirm if OneDrive asks):\n• " + strings.Join(auto, "\n• ") + "\n\n")
+		lines = append(lines, "OneDrive has been asked to sync "+joinNames(auto)+" again (confirm if it asks).")
 	}
 	if len(manual) > 0 {
-		b.WriteString("The web page for these libraries has been opened. Click 'Sync' on each page:\n• " + strings.Join(manual, "\n• ") + "\n\n")
+		lines = append(lines, "The SharePoint page for "+joinNames(manual)+" has been opened: click 'Sync' there.")
 	}
 	if len(none) > 0 {
-		b.WriteString("These libraries must be re-added manually. " + cfg.SupportContact() + "\n• " + strings.Join(none, "\n• ") + "\n\n")
+		lines = append(lines, "Your support team will need to add "+joinNames(none)+" back.")
 	}
-	dialog.Info("Syncing the libraries again", b.String())
+	return strings.Join(lines, "\n")
+}
+
+// joinNames lists names as "A", "A and B" or "A, B and C".
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

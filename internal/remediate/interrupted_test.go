@@ -129,7 +129,7 @@ func TestExecuteBackupDiskFullPutsFolderBack(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), "restored") || !strings.Contains(string(b), f.lib()) {
 		t.Errorf("report %q: %v\n%s", res.Report, err, b)
 	}
-	if !strings.Contains(resultMessage(res, config.Defaults()), res.Report) {
+	if !strings.Contains(resultMessage(res, config.Defaults(), "").PlainText(), res.Report) {
 		t.Error("the result message should point support at the report")
 	}
 }

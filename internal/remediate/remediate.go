@@ -205,29 +205,36 @@ func within(child, parent string) bool {
 // EnoughSpace reports whether the backup volume can hold the local data plus margin.
 func (p *Plan) EnoughSpace() bool { return p.FreeBytes >= p.Required }
 
-// Summary renders the plan for the confirmation dialogs / CLI.
+// Orphans returns the plan's folders.
+func (p *Plan) Orphans() []onedrive.Orphan {
+	out := make([]onedrive.Orphan, len(p.Items))
+	for i, it := range p.Items {
+		out[i] = it.Orphan
+	}
+	return out
+}
+
+// Summary renders the plan for the administrator's approval and the CLI:
+// the same groups as the user sees, with each folder's path and size.
 func (p *Plan) Summary() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "User: %s\n\n", p.Target.UserName)
+	fmt.Fprintf(&b, "User: %s\n", p.Target.UserName)
+	items := map[string]Item{}
 	for _, it := range p.Items {
-		fmt.Fprintf(&b, "• %s\n    %d file(s) stored on this PC (%s) will be saved; %d online-only file(s) are already in the cloud.\n",
-			it.Orphan.Path, it.Stats.LocalFiles, HumanBytes(it.Stats.LocalBytes), it.Stats.OnlineOnlyFiles)
-		switch {
-		case it.Orphan.EmptyOrg:
-			b.WriteString("    Empty leftover organisation folder; it will just be removed.\n")
-		case it.Orphan.Kind == onedrive.KindMoved:
-			fmt.Fprintf(&b, "    Old copy: the library now syncs to %s; it will not be re-synced.\n", it.Orphan.MovedTo)
-		case it.Orphan.Kind == onedrive.KindDisconnected:
-			b.WriteString("    From an account that is no longer connected; it will not be re-synced.\n")
-		case it.Orphan.CanResync():
-			b.WriteString("    Will be re-synced automatically afterwards.\n")
-		case it.Orphan.WebURL != "":
-			b.WriteString("    The library web page will be opened so the user can click 'Sync'.\n")
-		default:
-			b.WriteString("    Cannot be re-synced automatically (library details unknown).\n")
-		}
-		if len(it.Stats.Errors) > 0 {
-			fmt.Fprintf(&b, "    WARNING: %d item(s) could not be read; this folder will NOT be removed.\n", len(it.Stats.Errors))
+		items[onedrive.Clean(it.Orphan.Path)] = it
+	}
+	for _, g := range Groups(p.Orphans()) {
+		fmt.Fprintf(&b, "\n%s\n%s\n", g.Heading, g.Action)
+		for _, o := range g.Orphans {
+			it := items[onedrive.Clean(o.Path)]
+			fmt.Fprintf(&b, "• %s\n    %d file(s) stored on this PC (%s)", o.Path, it.Stats.LocalFiles, HumanBytes(it.Stats.LocalBytes))
+			if e := exception(o); e != "" {
+				b.WriteString("; " + e)
+			}
+			b.WriteString("\n")
+			if len(it.Stats.Errors) > 0 {
+				fmt.Fprintf(&b, "    WARNING: %d item(s) could not be read; this folder will NOT be removed.\n", len(it.Stats.Errors))
+			}
 		}
 	}
 	for _, e := range p.Excluded {

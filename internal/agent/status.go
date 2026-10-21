@@ -152,8 +152,7 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 	if len(s.Orphans) == 0 {
 		b.WriteString("\nShared folders:  all syncing.")
 	} else {
-		fmt.Fprintf(&b, "\n\nOneDrive / SharePoint folders that aren't syncing (%d):", len(s.Orphans))
-		items, footer = orphanItems(s.Orphans, remediate.ResyncNote)
+		items, footer = orphanItems(c, s.Orphans)
 		if s.OrphanSnooze.Active {
 			footer = strings.TrimSpace(footer + "\n\nThe alert for these folders is ignored " + s.OrphanSnooze.Describe() + ".")
 		}

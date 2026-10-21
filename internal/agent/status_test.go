@@ -49,10 +49,14 @@ func TestStatusSpec(t *testing.T) {
 	if !strings.Contains(spec.Body, "NOT running") || strings.Contains(spec.Body, "Checked") || strings.Contains(spec.Body, "version") {
 		t.Errorf("body: %q", spec.Body)
 	}
-	if len(spec.Items) != 4 || spec.Items[0].Title != "Stopped syncing (1)" || spec.Items[1].Title != "•  Bids - Documents" ||
-		spec.Items[1].Path != `C:\Users\d\Fabrikam\Bids - Documents` || spec.Items[1].Note == "" ||
+	if len(spec.Items) != 4 || spec.Items[0].Title != "Stopped syncing (1)" || spec.Items[0].Note == "" ||
+		!strings.HasPrefix(spec.Items[1].Title, "•  Bids - Documents") ||
+		spec.Items[1].Path != `C:\Users\d\Fabrikam\Bids - Documents` || spec.Items[1].Note != "" ||
 		spec.Items[2].Title != "Empty leftover folders (1)" || spec.Items[3].Title != "•  OLD LTD" {
 		t.Errorf("items: %+v", spec.Items)
+	}
+	if strings.Contains(spec.Body, "aren't syncing") {
+		t.Errorf("the headings say it; no intro line: %q", spec.Body)
 	}
 	var labels []string
 	for _, b := range spec.Buttons {
