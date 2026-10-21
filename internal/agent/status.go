@@ -366,6 +366,7 @@ func (a *Agent) showStatus() {
 	a.last = s
 	a.mu.Unlock()
 	a.ui.Show(statusSpec(cfg, s, a.actions()))
+	a.refresh() // bring the tray icon and alerts in line with what the card shows
 }
 
 // reshowAlerts brings back alerts the user dismissed or ignored.

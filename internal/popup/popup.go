@@ -182,6 +182,15 @@ func (m *Manager) do(f func()) {
 	call(pPostThreadMessageW, uintptr(m.tid), wmApp, 0, 0)
 }
 
+// rewake re-posts the wake-up after a modal loop (a popup menu). Windows
+// drops thread messages while one runs, so requests made meanwhile would
+// otherwise wait for the next unrelated request. UI thread only.
+func (m *Manager) rewake() {
+	if len(m.reqs) > 0 {
+		call(pPostThreadMessageW, uintptr(m.tid), wmApp, 0, 0)
+	}
+}
+
 // s scales a 96-DPI value.
 func (m *Manager) s(v int32) int32 { return v * m.dpi / 96 }
 

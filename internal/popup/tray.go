@@ -208,6 +208,7 @@ func (m *Manager) trayMenu() {
 	call(pSetForegroundWindow, m.tray.hwnd) // so the menu closes when clicking elsewhere
 	cmd := int(call(pTrackPopupMenu, menu, tpmReturnCmd|tpmNoNotify|tpmRightBtn|tpmBottomAlign, uintptr(pt.X), uintptr(pt.Y), 0, m.tray.hwnd, 0))
 	call(pPostMessageW, m.tray.hwnd, wmNull, 0, 0)
+	m.rewake()
 	if cmd >= 1 && cmd <= len(items) && items[cmd-1].Action != nil {
 		go items[cmd-1].Action()
 	}

@@ -52,6 +52,9 @@ type Agent struct {
 	onEvent    func(id uint32)
 	userFlow   func(exe string, lg *log.Logger, busy func(bool), stop func() bool)
 	afterPanic func()
+	// wake asks the check loop to run now instead of at the next interval
+	// (after a fix, or when the status card is opened). See refresh.
+	wake chan struct{}
 
 	mu            sync.Mutex // guards the fields below (buttons run on other goroutines)
 	missingSince  time.Time
@@ -139,6 +142,7 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 		profile: profile,
 		appData: os.Getenv("LOCALAPPDATA"),
 		user:    os.Getenv("USERNAME"),
+		wake:    make(chan struct{}, 1),
 	}
 	a.stopping = func() bool { return ctx.Err() != nil || (!standalone && !serviceRunning()) }
 	defer a.ev.Close()
@@ -165,6 +169,7 @@ func Run(ctx context.Context, standalone bool, stopEvent string) error {
 			a.waitForFix()
 			return nil
 		case <-timer.C:
+		case <-a.wake:
 		}
 		cfg := config.Load()
 		a.tick(cfg, time.Now())
@@ -195,6 +200,16 @@ const (
 	// than an endless restart loop.
 	autoRestartWindow = 30 * time.Minute
 )
+
+// refresh runs the next check now, so the tray icon and alerts catch up
+// straight away (e.g. green as soon as a fix has removed the folders). It
+// never blocks; requests made while a check is pending are merged.
+func (a *Agent) refresh() {
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
+}
 
 // restartPending reports an outage in which automatic restarts are still in progress.
 func (a *Agent) restartPending() bool {
@@ -605,6 +620,7 @@ func (a *Agent) runFix(name string, f func(busy func(bool), stopping func() bool
 		a.mu.Lock()
 		a.fixing, a.orphanKey = false, "" // re-evaluate (and re-alert if needed) on the next check
 		a.mu.Unlock()
+		a.refresh()
 	}()
 	// A panic inside the fix has already unwound through Execute (releasing
 	// its locks, deleting nothing more): put back or report what it left at
@@ -630,6 +646,7 @@ func (a *Agent) runFix(name string, f func(busy func(bool), stopping func() bool
 			a.ui.Show(fixingSpec(cfg))
 		} else {
 			a.ui.Hide(idFixing)
+			a.refresh() // the file work is done; don't wait for the result card to be closed
 		}
 	}, stopping)
 }

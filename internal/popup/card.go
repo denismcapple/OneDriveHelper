@@ -415,6 +415,7 @@ func (c *card) click(i int) {
 		cmd := int(call(pTrackPopupMenu, menu, tpmReturnCmd|tpmNoNotify|tpmBottomAlign, uintptr(pt.X), uintptr(pt.Y), 0, c.hwnd, 0))
 		call(pPostMessageW, c.hwnd, wmNull, 0, 0)
 		call(pDestroyMenu, menu)
+		c.m.rewake()
 		if cmd >= 1 && cmd <= len(b.Menu) {
 			if b.Dismiss {
 				c.m.setVisible(id, false)

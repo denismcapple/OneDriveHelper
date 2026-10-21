@@ -2,11 +2,9 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.9.1** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.9.2** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> **Latest update (0.9.1): the fix now works on PCs shared by more than one person.** In 0.8.0 to 0.9.0, if anyone else had ever used OneDrive on the same PC, **Fix** stopped with *"The fix can't start right now ... UserSyncRoots: Access is denied"* (event 5013) and changed nothing. Windows keeps each person's sync-folder settings private, so the tool now reads only the signed-in user's own.
->
-> **Not yet tested on Remote Desktop (RDS), Azure Virtual Desktop or Citrix.** Pilot it on one host first and keep 0.8.2 to roll back to.
+> **Latest update (0.9.2): tested on Remote Desktop (RDS).** The fix, including signing out to finish it and picking it up again on a different session host, has now been tested on RDS session hosts. The tray icon now turns green as soon as a fix is done, rather than up to a minute later, and the progress message no longer says the folders "have been moved" before they are.
 
 <p align="center">
   <img src="docs/images/status-problems.png" width="716" alt="OneDrive Helper status window listing folders that have stopped syncing">
@@ -75,7 +73,7 @@ Questions and messages (the fix confirmation and its result, the administrator a
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.9.1 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.9.2 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -132,8 +130,7 @@ The file is in the user's own profile, so the user could edit it. That can only 
 
 Events 5014 (restart or sign-out requested) and 5015 (fix being finished after signing in again) record what happened.
 
-> [!CAUTION]
-> The sign-out path, and finishing a fix on a different session host, have not yet been fully tested on real RDS, Azure Virtual Desktop or Citrix farms (see the note at the top). Until they have, pilot 0.9.x on one host first. If you'd rather not offer it at all, set `RestartToFinish` to `0`: users are then simply asked to close the program and try again, as in 0.8.x.
+Signing out, and finishing the fix on a different session host, have been tested on RDS session hosts. Azure Virtual Desktop and Citrix work the same way but haven't been tested separately. If you'd rather not offer a restart or sign-out at all, set `RestartToFinish` to `0`: users are then simply asked to close the program and try again, as in 0.8.x.
 
 ## Download
 
@@ -299,15 +296,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.9.1; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.9.2; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.9.1'
+$Version = 'v0.9.2'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = 'DA665CF042DD53D13F1D7E72E89C90A4A8F1A8F7142A1EDEEFB71702337213F8'
-    'arm64' = '2118DBF89743D67DDC95F56A806FCAE8A78C5D362B5719522BE5DD475C5FC338'
+    'x64'   = '58D4C53FD357EFC4A0904EB9D7EBC15049F05B2F6C0AD3C67E5BEAF789D63465'
+    'arm64' = 'B96FC750589C15E5463897EDDE705888B77FC5060676796BD38B4426AD36F836'
 }
 $Settings = @'
 {
