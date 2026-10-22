@@ -2,11 +2,11 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.10.2** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.10.5** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> **Coming in 0.10.5: what we learned fixing a stubborn folder on a Remote Desktop server.** A leftover library copy on an RDS session host couldn't be moved or deleted by anyone, administrators included, and a restart didn't help. Two separate things were blocking it: Windows still had the folder registered as a OneDrive sync folder (stored on the folder itself, with nothing left in the registry), and OneDrive had made every copy from that read-only library undeletable. The fix now clears both by itself, as the user, with no extra admin step. The "your support team will need to add … back" line is gone from the result too. See [What we learned on Remote Desktop servers](#what-we-learned-on-remote-desktop-servers).
+> **Latest update (0.10.5): what we learned fixing a stubborn folder on a Remote Desktop server.** A leftover library copy on an RDS session host couldn't be moved or deleted by anyone, administrators included, and a restart didn't help. Two separate things were blocking it: Windows still had the folder registered as a OneDrive sync folder (stored on the folder itself, with nothing left in the registry), and OneDrive had made every copy from that read-only library undeletable. The fix now clears both by itself, as the user, with no extra admin step. The "your support team will need to add … back" line is gone from the result too. See [What we learned on Remote Desktop servers](#what-we-learned-on-remote-desktop-servers).
 >
-> **Latest release (0.10.2): simpler, clearer messages.** Every card now says each thing once: what's wrong, then one line per group saying what the fix will do, then each folder's name with its path once in small print. Folder paths are underlined: click one to open it in Explorer. The fix result is a single card that lists only the folders that couldn't be fixed, with what stopped them in bold. The administrator approval is laid out the same way, with each folder's size in small print.
+> **0.10.2: simpler, clearer messages.** Every card now says each thing once: what's wrong, then one line per group saying what the fix will do, then each folder's name with its path once in small print. Folder paths are underlined: click one to open it in Explorer. The fix result is a single card that lists only the folders that couldn't be fixed, with what stopped them in bold. The administrator approval is laid out the same way, with each folder's size in small print.
 >
 > **0.10.1:** old copies are recognised even when the tool was installed after the rename, by matching the folder name with the libraries OneDrive knows about.
 >
@@ -90,7 +90,7 @@ Questions and messages (the fix confirmation and its result, the administrator a
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.2 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.5 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -342,15 +342,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.2; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.5; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.10.2'
+$Version = 'v0.10.5'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = '0756AA98EAC399B32CA33846F45DA1409567550E2ECA1F57C6563FA88E853E99'
-    'arm64' = '1CC23EFB7D4B27A0C6A8F33471033645B1BA6B2EA1D9D2EDB56DC65CD51807D1'
+    'x64'   = 'F5CDF27797F6470F7E8A8EB8243DE3F830D1ABC2CC9AF3CCBC4BC2D7E53986EA'
+    'arm64' = '140071E49E095A6E0A7D67FA8CB948FCD2AA64CD16A1B4100AF7752BE0062BAC'
 }
 $Settings = @'
 {
