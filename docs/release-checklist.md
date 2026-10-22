@@ -69,6 +69,13 @@ Both:
 - [ ] With `RestartToFinish` set to `0`, neither is offered; the user is told to close the program and try again.
 - [ ] A `pending-fix.json` older than 3 days is removed at sign-in without fixing anything.
 
+A dropped library that Windows still has registered as a sync folder, from a library the user can only read. This was seen on a real RDS host as `ACME-Training - Documents (1)`: moving it returned "Access to the cloud file is denied", even for an administrator, and its copies carried `Everyone:(DENY)(D,WD,AD,DC)`:
+
+- [ ] Before the fix, `fsutil reparsepoint query "<folder>"` shows a cloud tag (`0x9000xxxx1a`) and `OneDriveHelper.exe check` lists the folder as orphaned.
+- [ ] The fix logs event 5017, moves the folder, removes the read-only lock from the copies, backs them up and removes the folder. No UAC prompt is needed beyond the normal approval.
+- [ ] No restart or sign-out is offered for it (it is not a locked folder).
+- [ ] The live library next to it (same name without "(1)") is untouched and still syncing, and its files still show `Everyone:(DENY)` in `icacls`.
+
 ## 7. Uninstall
 
 - [ ] `uninstall --purge` removes the service, `HKLM\SOFTWARE\OneDriveHelper` and `%ProgramData%\OneDriveHelper\logo.png`.

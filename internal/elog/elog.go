@@ -62,6 +62,11 @@ const (
 	FixRestartRequested = 5014
 	// FixResumed: a fix held up by open files is being finished after a restart.
 	FixResumed = 5015
+	// FixSkippedCloud: a folder was skipped because Windows still treats it as
+	// part of OneDrive (a sync registration that could not be removed).
+	FixSkippedCloud = 5016
+	// FixDeadSyncRoot: a folder's dead OneDrive sync registration was removed so it could be fixed.
+	FixDeadSyncRoot = 5017
 )
 
 // Log is a best-effort event log writer; a nil or failed log silently drops events.

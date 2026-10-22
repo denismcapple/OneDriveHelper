@@ -304,6 +304,21 @@ func (r *run) folder(it Item, stageDir string, out *Outcome) {
 		r.warn(elog.FixRefusedLink, fmt.Sprintf("Fix for %s: %s was not touched because %v.", t.UserName, o.Path, err))
 		return
 	}
+	// A library OneDrive dropped without unregistering it is still a sync root
+	// to Windows' Cloud Files driver (the registration is kept on the folder,
+	// even with no registry entry left), so nobody may move or delete it.
+	// OneDrive isn't syncing it (checked above) and nothing is connected to
+	// it, so remove that dead registration. Files are not touched.
+	if dead, provider := deadSyncRoot(o.Path); dead {
+		if err := winapi.UnregisterSyncRoot(o.Path); err != nil {
+			out.Error = "Windows still treats this folder as part of OneDrive and its old registration could not be removed (" + err.Error() + "); nothing was changed"
+			r.warn(elog.FixSkippedCloud, fmt.Sprintf("Fix for %s: %s was skipped because Windows still has it registered as a %s sync folder and the registration could not be removed (%v).", t.UserName, o.Path, provider, err))
+			r.lg.Printf("skip %s: unregister dead sync root: %v", o.Path, err)
+			return
+		}
+		r.lg.Printf("removed the dead %s sync root registration of %s", provider, o.Path)
+		r.info(elog.FixDeadSyncRoot, fmt.Sprintf("Fix for %s: %s was still registered with Windows as a %s sync folder, with nothing connected to it. The registration was removed so the folder can be fixed.", t.UserName, o.Path, provider))
+	}
 	e := &JournalEntry{Source: o.Path, Staged: filepath.Join(stageDir, it.SaveAs), Backup: out.SavedTo, TenantRoot: o.TenantRoot}
 	r.j.Entries = append(r.j.Entries, e)
 	if err := r.j.set(e, StateMoving, ""); err != nil {
@@ -318,16 +333,20 @@ func (r *run) folder(it Item, stageDir string, out *Outcome) {
 		_ = r.j.set(e, StateSkipped, err.Error())
 		out.State = StateSkipped
 		var busy errBusy
+		var cloud errCloud
 		if errors.As(err, &busy) {
 			out.Locked = true
 			who := "a file in it is open in another program"
 			if progs := programsUsing(o.Path); len(progs) > 0 {
 				who = strings.Join(progs, ", ") + " has a file in it open"
 			}
-			out.Error = "skipped because " + who + ". Close it (and any Explorer windows in that folder) and try again"
+			out.Error = who + ". Close it (and any Explorer windows in that folder) and try again"
 			r.warn(elog.FixSkippedOpen, fmt.Sprintf("Fix for %s: %s was skipped because %s (%v).", t.UserName, o.Path, who, err))
+		} else if errors.As(err, &cloud) {
+			out.Error = "Windows still treats this folder as part of OneDrive (a leftover cloud marker) and would not let it be moved; nothing was changed"
+			r.warn(elog.FixSkippedCloud, fmt.Sprintf("Fix for %s: %s was skipped because Windows still treats it as part of OneDrive (%v).", t.UserName, o.Path, err))
 		} else {
-			out.Error = "skipped: the folder could not be moved: " + err.Error()
+			out.Error = "the folder could not be moved: " + err.Error()
 		}
 		r.lg.Printf("skip %s: %v", o.Path, err)
 		return
@@ -362,7 +381,12 @@ func (r *run) folder(it Item, stageDir string, out *Outcome) {
 		return
 	}
 
-	// 4. Check every entry against the record before deleting anything.
+	// 4. Copies from a library the user can only read are locked by OneDrive
+	// (deny delete/write for Everyone). Unlock the staged copies, then check
+	// every entry against the record before deleting anything.
+	if n, errs := unlockReadOnly(e.Staged, rec); n > 0 || len(errs) > 0 {
+		r.lg.Printf("%s: removed OneDrive's read-only lock from %d item(s); %d could not be unlocked: %v", o.Path, n, len(errs), errs)
+	}
 	env.beforeCheck(e.Staged)
 	v, why := checkForDelete(e.Staged, rec)
 	if why != "" {

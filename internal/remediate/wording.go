@@ -80,12 +80,10 @@ func exception(o onedrive.Orphan) string {
 	switch {
 	case len(o.KnownFolders) > 0:
 		return "your support team will fix this one"
-	case !o.NeedsResync() || o.CanResync():
-		return ""
-	case o.WebURL != "":
+	case o.NeedsResync() && !o.CanResync() && o.WebURL != "":
 		return "click 'Sync' on its SharePoint page afterwards"
 	}
-	return "your support team will add it back"
+	return ""
 }
 
 // openFolder opens a listed folder in Explorer; folderExists decides whether

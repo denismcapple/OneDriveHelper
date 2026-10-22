@@ -115,7 +115,7 @@ func TestOrphanSpec(t *testing.T) {
 		t.Errorf("title/body/footer: %q / %q / %q", s.Title, s.Body, s.Footer)
 	}
 	if len(s.Items) != maxListed+1 || !s.Items[0].Heading || s.Items[0].Title != "Stopped syncing (7)" || s.Items[0].Note != remediate.ActionResync ||
-		s.Items[1].Path != `C:\Users\d\Org\A` || s.Items[1].Title != "•  A (your support team will add it back)" || s.Items[1].Note != "" {
+		s.Items[1].Path != `C:\Users\d\Org\A` || s.Items[1].Title != "•  A" || s.Items[1].Note != "" {
 		t.Errorf("items: %+v", s.Items)
 	}
 	empty := orphanSpec(cfg, []onedrive.Orphan{{Name: "Old", Path: `C:\Users\d\Old`, TenantRoot: `C:\Users\d\Old`, EmptyOrg: true}}, Actions{})

@@ -432,7 +432,7 @@ func ResyncNote(o onedrive.Orphan) string {
 	case o.WebURL != "":
 		return "Can't be re-synced automatically - its web page will open so you can click 'Sync'."
 	default:
-		return "Can't be re-synced automatically - your support team will need to re-add it."
+		return "Can't be re-synced automatically (its library details aren't known)."
 	}
 }
 
@@ -468,21 +468,20 @@ func Resync(orphans []onedrive.Orphan, lg *log.Logger) string {
 		return ""
 	}
 	ev.Info(elog.ResyncRequested, fmt.Sprintf("Re-sync requested. Automatic: %v; manual: %v; unknown: %v", auto, manual, none))
-	return resyncText(auto, manual, none)
+	return resyncText(auto, manual)
 }
 
 // resyncText tells the user, in one line per case, what happened to the
-// libraries that should sync again.
-func resyncText(auto, manual, none []string) string {
+// libraries that should sync again. Libraries that can't be re-synced from
+// here aren't mentioned: the user can't do anything about them, and a
+// leftover copy rarely needs adding back.
+func resyncText(auto, manual []string) string {
 	var lines []string
 	if len(auto) > 0 {
 		lines = append(lines, "OneDrive has been asked to sync "+joinNames(auto)+" again (confirm if it asks).")
 	}
 	if len(manual) > 0 {
 		lines = append(lines, "The SharePoint page for "+joinNames(manual)+" has been opened: click 'Sync' there.")
-	}
-	if len(none) > 0 {
-		lines = append(lines, "Your support team will need to add "+joinNames(none)+" back.")
 	}
 	return strings.Join(lines, "\n")
 }

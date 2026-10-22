@@ -4,7 +4,9 @@ A small Windows tool that keeps an eye on OneDrive for your users, and tells the
 
 **Current version: 0.10.2** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> **Latest update (0.10.2): simpler, clearer messages.** Every card now says each thing once: what's wrong, then one line per group saying what the fix will do, then each folder's name with its path once in small print. Folder paths are underlined: click one to open it in Explorer. The fix result is a single card that lists only the folders that couldn't be fixed, with what stopped them in bold. The administrator approval is laid out the same way, with each folder's size in small print.
+> **Coming in 0.10.5: what we learned fixing a stubborn folder on a Remote Desktop server.** A leftover library copy on an RDS session host couldn't be moved or deleted by anyone, administrators included, and a restart didn't help. Two separate things were blocking it: Windows still had the folder registered as a OneDrive sync folder (stored on the folder itself, with nothing left in the registry), and OneDrive had made every copy from that read-only library undeletable. The fix now clears both by itself, as the user, with no extra admin step. The "your support team will need to add … back" line is gone from the result too. See [What we learned on Remote Desktop servers](#what-we-learned-on-remote-desktop-servers).
+>
+> **Latest release (0.10.2): simpler, clearer messages.** Every card now says each thing once: what's wrong, then one line per group saying what the fix will do, then each folder's name with its path once in small print. Folder paths are underlined: click one to open it in Explorer. The fix result is a single card that lists only the folders that couldn't be fixed, with what stopped them in bold. The administrator approval is laid out the same way, with each folder's size in small print.
 >
 > **0.10.1:** old copies are recognised even when the tool was installed after the rename, by matching the folder name with the libraries OneDrive knows about.
 >
@@ -105,9 +107,9 @@ Fixing a broken folder means deleting it from the PC, so we were careful:
 
 1. **The user confirms.** They see the same groups as the alert, where their files will be saved, and that nothing is deleted until a copy is saved.
 2. **An administrator approves through UAC.** Your technician can type their admin credentials on a standard user's PC. The approval step looks at the problem again on its own, shows exactly what will happen (folders, file counts, sizes, free disk space), and logs who approved it. If nobody answers within 15 minutes, the user is told nothing changed (event 5010); the approval window closes itself after 10 minutes, and a late approval does nothing.
-3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told which program to close (for example "Microsoft Excel has a file in it open") and to try again; other folders carry on. If every folder was skipped, the user is told plainly that nothing was changed. See [When files are locked](#when-files-are-locked) for the restart option.
+3. **The folder is moved out of the way first.** It goes to `C:\Users\<user>\ODHelper\Fixing\<date and time>\`, so nothing (an app, or OneDrive itself) can save into its old location while the fix runs. If something has a file in it open, the folder is skipped and the user is told which program to close (for example "Microsoft Excel has a file in it open") and to try again; other folders carry on. A library OneDrive dropped without unregistering it can also still be registered with Windows as a sync folder. The registration is kept on the folder itself, even with nothing left in the registry, and Windows then refuses to let anyone move or delete the folder, administrators included. If nothing is connected to it, the fix removes that dead registration first, as the user (event 5017); the files aren't touched. Only if that fails is the folder skipped (event 5016). If every folder was skipped, the user is told plainly that nothing was changed. See [When files are locked](#when-files-are-locked) for the restart option.
 4. **Files are saved.** Every file actually stored on the PC is copied to `C:\Users\<user>\ODHelper\Saved\<date and time>\<folder>`. Online-only placeholders are skipped because they're already in the cloud. The tool checks there's enough free disk space before it starts. Each copy is written to disk, its size checked, and the original is confirmed unchanged while it was being read.
-5. **Only proven copies are deleted.** Before deleting anything, every file is checked again: it must have been copied in this run and be unchanged since, and nothing may have it open for writing. If even one file doesn't pass (or anything new appeared), nothing is deleted and the folder is put back where it was. If OneDrive has started syncing the old location again in the meantime, both copies are kept. A `manifest.json` records every step, before it happens.
+5. **Only proven copies are deleted.** Copies from a library the user can only read are locked by OneDrive, with `Everyone:(DENY)(D,WD,AD,DC)` on every file and folder, so nobody can delete them, administrators included. The user owns their profile's files, so after the backup the fix removes exactly that lock from the copies it's about to delete, as the user; no other permission is changed. Before deleting anything, every file is checked again: it must have been copied in this run and be unchanged since, and nothing may have it open for writing. If even one file doesn't pass (or anything new appeared), nothing is deleted and the folder is put back where it was. If OneDrive has started syncing the old location again in the meantime, both copies are kept. A `manifest.json` records every step, before it happens.
 6. **OneDrive is asked to sync the library again**, for folders that were fully fixed (not for old copies or folders from disconnected accounts). Where the library details are known, that's automatic. Otherwise the library's web page opens so the user can click Sync. The leftover shortcuts in Explorer's side panel are cleaned up too.
 7. **The user sees one result card.** It says how many folders were moved to the backup folder, lists any folder that couldn't be fixed with its path and what stopped it (in bold, for example **Microsoft Excel has a file in it open**), says which libraries OneDrive was asked to sync again, and links to the saved files.
 
@@ -147,6 +149,34 @@ The file is in the user's own profile, so the user could edit it. That can only 
 Events 5014 (restart or sign-out requested) and 5015 (fix being finished after signing in again) record what happened.
 
 Signing out, and finishing the fix on a different session host, have been tested on RDS session hosts. Azure Virtual Desktop and Citrix work the same way but haven't been tested separately. If you'd rather not offer a restart or sign-out at all, set `RestartToFinish` to `0`: users are then simply asked to close the program and try again, as in 0.8.x.
+
+Two other blocks look like locked files but aren't, so no restart or sign-out is offered for them (it wouldn't help): a dead sync registration on the folder, and OneDrive's read-only lock on copies from a library the user can only read. The fix clears both itself, as described in steps 3 and 5 of [How the fix works](#how-the-fix-works), and in the next section.
+
+### What we learned on Remote Desktop servers
+
+Testing on a real RDS session host turned up a folder that none of the usual tricks could remove. Here's what was going on, in case you meet the same thing.
+
+**The symptom.** A user had a leftover copy of a SharePoint library, `ACME-Training - Documents (1)`, next to the real, syncing `ACME-Training - Documents`. OneDrive Helper found it and the fix was approved, but the folder couldn't be moved: *"Access to the cloud file is denied."* The same thing happened when an administrator tried to rename it, delete it, or delete a single file inside it. Restarting the server didn't help, and signing the user out wouldn't have either: nothing had the folder open.
+
+**Problem 1: Windows still thought it was a OneDrive sync folder.**
+- **What we found.** OneDrive had stopped syncing that library months earlier, but it never told Windows to forget it. Windows keeps a sync folder's registration in two places: in the registry, and on the folder itself, inside OneDrive's cloud marker. The registry entry was gone, so the tool, Explorer and the user's own OneDrive settings all agreed nothing was syncing there. The registration on the folder was still there. Windows' Cloud Files driver protects a registered sync folder from being moved or deleted, and with OneDrive no longer connected to it, it refused everyone. Because the registration is stored on disk, a restart changes nothing.
+- **How we proved it.** Asking Windows directly with `CfGetSyncRootInfoByPath` showed the leftover was still a "OneDrive - Business" sync folder, with *no* provider connected (status 0). The live library showed as connected. Deleting OneDrive's marker by hand (`fsutil reparsepoint delete`) was refused, even for an administrator.
+- **The fix.** Windows has a supported call for exactly this: `CfUnregisterSyncRoot`, run on that path, *as the user*. It removed the registration in one step, and the folder could be moved straight away. The live library next to it was untouched. OneDrive Helper now runs this check before moving any folder. If the folder itself is a OneDrive sync folder with nothing connected (and OneDrive's settings don't list it as synced), it removes that dead registration first and logs event 5017. No files are touched.
+
+**Problem 2: OneDrive had made the copies undeletable.**
+- **What we found.** Once the folder could move, the backup worked, but the copies couldn't be deleted. The user can only *read* that library, and OneDrive protects local copies from read-only libraries with an explicit deny entry on every file and folder: `Everyone:(DENY)(D,WD,AD,DC)` (no delete, write, append or delete-child). A deny entry beats every allow, so not even an administrator could delete them. (The tool's message at that point, "open in another program", was wrong. It now says Windows refused the delete, and only says "open" when a file really is open.)
+- **The fix.** The files are in the user's own profile, so the user owns them, and Windows always lets an owner change a file's permissions. After the backup has been verified, OneDrive Helper removes exactly OneDrive's deny entry from the copies it's about to delete, then deletes them as usual. Only explicit "Everyone" deny entries limited to delete/write are removed, and only on the copies in the `Fixing` folder. Every other check still applies. The live library keeps its read-only protection, as SharePoint intends.
+
+**Why nothing new needed admin rights.** Both fixes run as the user, like the rest of the file work. Elevation wouldn't have helped anyway: the Cloud Files driver and the deny entries refused administrators too. The only admin step is still the approval.
+
+**Why the old message is gone.** When OneDrive Helper can't re-sync a library itself, the result card used to say "Your support team will need to add … back". For leftover copies like this one, there's nothing to add back: the real library is already syncing. So that line has been removed.
+
+**If you meet it on a version without these fixes**, sign in as the affected user and clear it by hand:
+1. Unregister the dead sync folder with `CfUnregisterSyncRoot` (a few lines of PowerShell with `Add-Type`; open an issue if you'd like the snippet).
+2. Remove the read-only lock: `icacls "<folder>" /remove:d Everyone /T /C /Q`.
+3. Run **Fix** again.
+
+Only do this on the leftover copy, never on the library that's still syncing.
 
 ## Download
 
@@ -445,6 +475,8 @@ And for information, if you want the full picture:
 | 5013 | Warning | No fix was planned: OneDrive's settings couldn't be read, OneDrive was starting up, or it couldn't tell whether OneDrive was running |
 | 5014 | Information | Folders were locked; the user chose to restart or sign out, and the fix will finish at their next sign-in (the folders are listed) |
 | 5015 | Information | A fix that waited for the user to sign in again is being finished (when and on which computer it was approved, and the folders) |
+| 5016 | Warning | A folder was skipped because Windows still has it registered as a OneDrive sync folder and the registration could not be removed |
+| 5017 | Information | A folder was still registered with Windows as a OneDrive sync folder, with nothing connected to it; the dead registration was removed so it could be fixed |
 | 3007 | Warning | The list of running programs couldn't be read 5 checks in a row, so OneDrive Helper can't tell whether OneDrive is running (no restart or alert happens while it can't tell) |
 
 A fix where folders were only skipped, kept or left alone logs those per-folder events, not 5003.
@@ -551,6 +583,7 @@ There's more in [SECURITY.md](SECURITY.md), including how to report a problem.
 * If someone moved their OneDrive folder outside their profile, problems there are reported but not fixed automatically.
 * A folder that's open in another program (a document, or an Explorer window inside it) is skipped by the fix. The user is asked to close it and try again. They can also restart (single-user workstations) or sign out (everywhere else), and the fix finishes at their next sign-in. With local, non-roaming profiles on a multi-host farm, the request stays on the host where it was made, so it only finishes when the user signs in there again.
 * A folder containing a junction or symbolic link inside it isn't deleted; it's put back and the reason is shown.
+* Clearing a dead sync registration has been proven on a real RDS session host. The automated tests can register and unregister a disconnected sync folder, but Windows on a development PC didn't refuse to move it the way the server did, so the refusal itself is only covered by that real-world case.
 * Users can turn off notifications for apps in Windows. That doesn't affect these alerts, but if they close the user part, the service just starts it again.
 
 ## Licence

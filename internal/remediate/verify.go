@@ -201,7 +201,10 @@ func checkForDelete(staged string, rec record) (*verified, string) {
 		h, err := openForDelete(filepath.Join(staged, r), false)
 		if err != nil {
 			v.close()
-			return nil, fmt.Sprintf("%s is open in another program: %v", r, err)
+			if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+				return nil, fmt.Sprintf("%s is open in another program", r)
+			}
+			return nil, fmt.Sprintf("Windows would not allow %s to be deleted (%v)", r, err)
 		}
 		m, err := metaOf(h)
 		if err != nil || m != re.Meta {
@@ -306,6 +309,13 @@ type errBusy struct{ err error }
 func (e errBusy) Error() string { return e.err.Error() }
 func (e errBusy) Unwrap() error { return e.err }
 
+// errCloud marks a move refused by the Cloud Files filter: Windows still
+// treats the folder as (part of) a OneDrive sync root.
+type errCloud struct{ err error }
+
+func (e errCloud) Error() string { return e.err.Error() }
+func (e errCloud) Unwrap() error { return e.err }
+
 // A busy folder is tried moveTries times over about 5 seconds (vars for tests).
 var (
 	moveTries    = 3
@@ -365,10 +375,44 @@ func renameOnce(src, dst string) error {
 }
 
 func classifyMoveErr(err error) error {
-	if errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+	if isBusyErr(err) {
 		return errBusy{err}
 	}
+	if isCloudErr(err) {
+		return errCloud{err}
+	}
 	return err
+}
+
+func isBusyErr(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_SHARING_VIOLATION)
+}
+
+// Cloud Files filter errors seen when a folder still carries a cloud marker
+// (Win32 codes: HRESULT 0x8007016A, 0x8007018B).
+const (
+	errnoCloudProviderNotRunning = windows.Errno(362)
+	errnoCloudAccessDenied       = windows.Errno(395)
+)
+
+func isCloudErr(err error) bool {
+	return errors.Is(err, errnoCloudProviderNotRunning) || errors.Is(err, errnoCloudAccessDenied)
+}
+
+// deadSyncRoot reports whether the folder at path is itself a OneDrive sync
+// root that Windows' Cloud Files driver still has registered (on the folder,
+// even with no entry in the registry) but with no OneDrive connected to it.
+// The driver refuses to move or delete such a folder for anyone.
+func deadSyncRoot(path string) (bool, string) {
+	info, err := winapi.SyncRootInfo(path)
+	if err != nil || info.Status != winapi.SyncProviderDisconnected || !strings.HasPrefix(info.Provider, "OneDrive") {
+		return false, ""
+	}
+	m, _, err := metaNoFollow(path, true)
+	if err != nil || int64(m.ID[1])<<32|int64(m.ID[2]) != info.FileID {
+		return false, "" // path is inside a sync root, not the root itself
+	}
+	return true, info.Provider
 }
 
 // noLinkBelow checks every path component below profile, down to and

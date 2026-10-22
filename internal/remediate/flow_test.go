@@ -225,7 +225,7 @@ func TestItemsListEachFolderOnceWithAnOpenLink(t *testing.T) {
 		t.Fatalf("items: %+v %q", items, more)
 	}
 	if items[1].Title != "•  A - Documents (click 'Sync' on its SharePoint page afterwards)" || items[1].Note != "" ||
-		items[2].Title != "•  B - Documents (your support team will add it back)" {
+		items[2].Title != "•  B - Documents" {
 		t.Errorf("exceptions: %q / %q", items[1].Title, items[2].Title)
 	}
 	if items[1].Open != nil {
@@ -242,7 +242,7 @@ func TestResultMessage(t *testing.T) {
 	cfg.SupportName = "the Service Desk"
 	ok := &Result{RunDir: `C:\Users\d\ODHelper\Saved\2026-10-21_1401`, Outcomes: []Outcome{
 		{Path: `C:\Users\d\Org\A`, State: StateDone, Removed: true}, {Path: `C:\Users\d\Org\B`, State: StateDone, Removed: true}}}
-	m := resultMessage(ok, cfg, resyncText([]string{"A"}, nil, nil))
+	m := resultMessage(ok, cfg, resyncText([]string{"A"}, nil))
 	if m.Heading != "Folders fixed" || m.Text != "2 folders were moved to your backup folder." || m.Footer != "" || len(m.Items) != 2 ||
 		m.Items[0].Title != "OneDrive has been asked to sync A again (confirm if it asks)." ||
 		m.Items[1].Title != "Your saved files are in" || m.Items[1].Path != ok.RunDir {
