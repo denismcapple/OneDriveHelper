@@ -31,21 +31,22 @@ import (
 )
 
 var (
-	user32           = windows.NewLazySystemDLL("user32.dll")
-	gdi32            = windows.NewLazySystemDLL("gdi32.dll")
-	dwmapi           = windows.NewLazySystemDLL("dwmapi.dll")
-	pFindWindowW     = user32.NewProc("FindWindowW")
-	pGetWindowRect   = user32.NewProc("GetWindowRect")
-	pPrintWindow     = user32.NewProc("PrintWindow")
-	pPostMessageW    = user32.NewProc("PostMessageW")
-	pGetDC           = user32.NewProc("GetDC")
-	pReleaseDC       = user32.NewProc("ReleaseDC")
-	pCreateCompatDC  = gdi32.NewProc("CreateCompatibleDC")
-	pCreateDIB       = gdi32.NewProc("CreateDIBSection")
-	pSelectObject    = gdi32.NewProc("SelectObject")
-	pDeleteObject    = gdi32.NewProc("DeleteObject")
-	pDeleteDC        = gdi32.NewProc("DeleteDC")
-	pDwmGetWindowAtt = dwmapi.NewProc("DwmGetWindowAttribute")
+	user32              = windows.NewLazySystemDLL("user32.dll")
+	gdi32               = windows.NewLazySystemDLL("gdi32.dll")
+	dwmapi              = windows.NewLazySystemDLL("dwmapi.dll")
+	pFindWindowExW      = user32.NewProc("FindWindowExW")
+	pGetWindowThreadPID = user32.NewProc("GetWindowThreadProcessId")
+	pGetWindowRect      = user32.NewProc("GetWindowRect")
+	pPrintWindow        = user32.NewProc("PrintWindow")
+	pPostMessageW       = user32.NewProc("PostMessageW")
+	pGetDC              = user32.NewProc("GetDC")
+	pReleaseDC          = user32.NewProc("ReleaseDC")
+	pCreateCompatDC     = gdi32.NewProc("CreateCompatibleDC")
+	pCreateDIB          = gdi32.NewProc("CreateDIBSection")
+	pSelectObject       = gdi32.NewProc("SelectObject")
+	pDeleteObject       = gdi32.NewProc("DeleteObject")
+	pDeleteDC           = gdi32.NewProc("DeleteDC")
+	pDwmGetWindowAtt    = dwmapi.NewProc("DwmGetWindowAttribute")
 )
 
 type rect struct{ L, T, R, B int32 }
@@ -111,7 +112,7 @@ func main() {
 	if err := cmd.Start(); err != nil {
 		log.Printf("settings tool: %v", err)
 	} else {
-		if h := waitWindow("OneDriveHelperConfig", ""); h != 0 {
+		if h := waitWindow("OneDriveHelperConfig", uint32(cmd.Process.Pid)); h != 0 {
 			time.Sleep(3 * time.Second) // let every control finish painting
 			save(filepath.Join(*out, "settings-tool.png"), decorate(capture(h), 8))
 		}
@@ -124,16 +125,22 @@ func main() {
 	fmt.Println("screenshots written to", *out)
 }
 
-func waitWindow(class, title string) uintptr {
+// waitWindow waits for process pid's top-level window of the given class
+// (another copy of the settings tool may already be open).
+func waitWindow(class string, pid uint32) uintptr {
 	c, _ := windows.UTF16PtrFromString(class)
-	var t *uint16
-	if title != "" {
-		t, _ = windows.UTF16PtrFromString(title)
-	}
 	for i := 0; i < 50; i++ {
-		if h, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(c)), uintptr(unsafe.Pointer(t))); h != 0 {
-			time.Sleep(700 * time.Millisecond) // let it finish drawing
-			return h
+		for h := uintptr(0); ; {
+			h, _, _ = pFindWindowExW.Call(0, h, uintptr(unsafe.Pointer(c)), 0)
+			if h == 0 {
+				break
+			}
+			var owner uint32
+			pGetWindowThreadPID.Call(h, uintptr(unsafe.Pointer(&owner)))
+			if owner == pid {
+				time.Sleep(700 * time.Millisecond) // let it finish drawing
+				return h
+			}
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

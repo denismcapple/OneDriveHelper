@@ -12,6 +12,7 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/agent"
 	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
+	"github.com/denismcapple/OneDriveHelper/internal/migrate"
 	"github.com/denismcapple/OneDriveHelper/internal/remediate"
 	"github.com/denismcapple/OneDriveHelper/internal/version"
 	"github.com/denismcapple/OneDriveHelper/internal/winapi"
@@ -45,6 +46,18 @@ func run() int {
 		start := time.Now()
 		_ = fs.Parse(os.Args[2:])
 		return remediate.RunApproval(*sid, remediate.ParseDeadline(*deadline, start))
+	case "migrate-approve":
+		fs := flag.NewFlagSet("migrate-approve", flag.ContinueOnError)
+		sid := fs.String("sid", "", "user SID")
+		deadline := fs.String("deadline", "", "Unix time after which nothing may be approved")
+		start := time.Now()
+		_ = fs.Parse(os.Args[2:])
+		t, err := remediate.TargetForSID(*sid)
+		if err != nil {
+			dialog.Error("The move can't be approved", err.Error())
+			return 1
+		}
+		return migrate.RunApproval(t.SID, remediate.ParseDeadline(*deadline, start), t.ProfileDir)
 	case "test-popup":
 		if err := agent.RunSample(); err != nil {
 			dialog.Error("The sample popups could not be shown", err.Error())

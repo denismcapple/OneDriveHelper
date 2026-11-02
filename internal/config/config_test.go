@@ -209,3 +209,19 @@ func TestGetSet(t *testing.T) {
 		}
 	}
 }
+
+func TestShortcutSettingsValidated(t *testing.T) {
+	c := Defaults()
+	c.MigrationShortcutName = "Network Drive"
+	if c.Validate() == nil {
+		t.Error("a name without a target is refused")
+	}
+	c.MigrationShortcutTarget = `U:\`
+	if err := c.Validate(); err != nil {
+		t.Errorf("name and target: %v", err)
+	}
+	c.MigrationShortcutName = `::`
+	if c.Validate() == nil {
+		t.Error("a name that can't be a file name is refused")
+	}
+}

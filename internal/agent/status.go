@@ -9,6 +9,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/dialog"
+	"github.com/denismcapple/OneDriveHelper/internal/migrate"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/popup"
 	"github.com/denismcapple/OneDriveHelper/internal/remediate"
@@ -34,6 +35,10 @@ type Status struct {
 	Session      uint32
 	// Interrupted lists earlier fixes that did not finish (folders not where they were).
 	Interrupted []remediate.Interrupted
+	// Issues are problems OneDrive itself reports (sign-in, sync errors, ...).
+	Issues []Problem
+	// Migration is the offer to move redirected folders to OneDrive (nil = none).
+	Migration *migrate.Offer
 }
 
 // NotRunning reports a OneDrive outage worth telling the user about.
@@ -52,7 +57,7 @@ func (s Status) unfinished() int {
 
 // Problems counts what needs attention.
 func (s Status) Problems() int {
-	n := len(s.Orphans) + s.unfinished()
+	n := len(s.Orphans) + s.unfinished() + len(s.Issues)
 	if s.NotRunning() {
 		n++
 	}
@@ -63,7 +68,7 @@ func (s Status) severity() popup.Severity {
 	switch {
 	case len(s.Orphans) > 0 || s.unfinished() > 0:
 		return popup.Critical
-	case s.NotRunning():
+	case s.NotRunning() || len(s.Issues) > 0:
 		return popup.Warning
 	}
 	return popup.OK
@@ -77,6 +82,9 @@ func (s Status) summary() string {
 	}
 	if s.unfinished() > 0 {
 		parts = append(parts, "an earlier fix did not finish")
+	}
+	if len(s.Issues) > 0 {
+		parts = append(parts, "OneDrive needs attention")
 	}
 	switch n := len(s.Orphans); {
 	case n == 1:
@@ -163,6 +171,12 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 			b.WriteString("\n\nAn earlier fix did not finish. These folders are not where they were:\n" + strings.TrimSpace(i.Text()))
 		}
 	}
+	if len(s.Issues) > 0 {
+		items = append([]popup.Item{{Title: issuesTitle, Heading: true}}, append(issueItems(s.Issues), items...)...)
+	}
+	if s.Migration != nil {
+		b.WriteString("\nYour " + s.Migration.Names() + " are still on a network drive. They can be moved to this computer and backed up to OneDrive.")
+	}
 
 	title := "Everything looks good"
 	if n := s.Problems(); n == 1 {
@@ -182,6 +196,9 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 	if len(s.Orphans) > 0 {
 		alerts = append(alerts, idOrphans)
 	}
+	if len(s.Issues) > 0 {
+		alerts = append(alerts, idIssues)
+	}
 	if ig, ok := ignoreButton(c, a, alerts...); ok && len(alerts) > 0 {
 		spec.Buttons = append(spec.Buttons, ig)
 	} else {
@@ -192,7 +209,11 @@ func statusSpec(c config.Config, s Status, a Actions) popup.Spec {
 		spec.Buttons = append(spec.Buttons, popup.Button{Label: "Restart OneDrive", Primary: true, Dismiss: true, Action: a.Relaunch})
 	}
 	if len(s.Orphans) > 0 && c.RemediationEnabled {
-		spec.Buttons = append(spec.Buttons, popup.Button{Label: "Fix (admin)", Primary: true, Dismiss: true, Action: a.Fix})
+		spec.Buttons = append(spec.Buttons, popup.Button{Label: c.FixLabel(), Primary: true, Dismiss: true, Action: a.Fix})
+	} else if b, ok := issueButton(s.Issues, a); ok && !s.NotRunning() {
+		spec.Buttons = append(spec.Buttons, b)
+	} else if s.Migration != nil && a.Migrate != nil {
+		spec.Buttons = append(spec.Buttons, migrateButton(c, a))
 	}
 	return spec
 }
@@ -219,6 +240,24 @@ func Report(c config.Config, s Status, logPath string) string {
 		fmt.Fprintf(&b, "  %s  %s  %s\r\n", a.Key, a.UserEmail, a.UserFolder)
 		for _, f := range a.SyncedFolders {
 			fmt.Fprintf(&b, "    synced: %s\r\n", f)
+		}
+	}
+	if len(s.Issues) > 0 {
+		fmt.Fprintf(&b, "\r\nOneDrive problems (%d):\r\n", len(s.Issues))
+		for _, p := range s.Issues {
+			fmt.Fprintf(&b, "  - %s\r\n", p.Text)
+			if len(p.Libraries) > 0 {
+				fmt.Fprintf(&b, "    affects: %s\r\n", strings.Join(p.Libraries, ", "))
+			}
+		}
+	}
+	if s.Migration != nil {
+		b.WriteString("\r\nRedirected folders that can move to OneDrive backup:\r\n")
+		for _, f := range s.Migration.Folders {
+			fmt.Fprintf(&b, "  - %s (%s): %s\r\n", f.Name, f.Value, f.Current)
+		}
+		for _, f := range s.Migration.Manual {
+			fmt.Fprintf(&b, "  - %s: %s (unknown folder, left alone)\r\n", f.Value, f.Current)
 		}
 	}
 	fmt.Fprintf(&b, "\r\nFolders not syncing (%d):\r\n", len(s.Orphans))

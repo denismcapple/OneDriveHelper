@@ -76,6 +76,40 @@ A dropped library that Windows still has registered as a sync folder, from a lib
 - [ ] No restart or sign-out is offered for it (it is not a locked folder).
 - [ ] The live library next to it (same name without "(1)") is untouched and still syncing, and its files still show `Everyone:(DENY)` in `icacls`.
 
-## 7. Uninstall
+## 7. Administrator approval off
+
+- [ ] With `RequireAdminApproval` = `0`, the buttons read **Fix** and **Move to OneDrive** (no "(admin)"), and the confirmation doesn't mention an administrator.
+- [ ] A fix runs with no UAC prompt; event 5001 says the user confirmed it themselves. The file work is the same as with approval.
+
+## 8. OneDrive problem alerts (`OneDriveIssueAlerts` = `1`)
+
+On Windows 11 or Server 2025 (`OneDriveHelper.exe check` lists "OneDrive status" per library):
+
+- [ ] **Paused:** pause syncing from OneDrive's icon. After `IssueAlertGraceMinutes`, **OneDrive needs your attention** shows OneDrive's text and the libraries; event 6001. Resume: the alert goes and event 6002 is logged.
+- [ ] **Sync problem:** create a file OneDrive can't sync (for example a name ending in a space, created from the command line), or have a conflict. After about 2 minutes, the alert shows OneDrive's message; its button (e.g. **View sync issues**) opens OneDrive's own window.
+- [ ] **Sign-in needed:** sign out of the OneDrive account in OneDrive's settings (or revoke the user's sessions in Entra). The alert's button starts OneDrive's sign-in.
+- [ ] **Not responding:** suspend `OneDrive.exe` (Resource Monitor → right-click → Suspend process). After about 2 minutes the alert offers **Restart OneDrive**; it restarts OneDrive (event 6003, then 6004).
+- [ ] **Ignore** hides it; a different problem brings it back.
+
+On Windows 10, Server 2019 or 2022:
+
+- [ ] `check` says the status isn't available and shows the provider status per library instead.
+- [ ] Pulling the network cable for longer than the grace shows the offline alert; signing out of OneDrive's account shows "isn't connected" with **Open OneDrive**.
+
+## 9. Folder Redirection → OneDrive backup (`FolderRedirectionMigration` = `1`)
+
+On a domain-joined test workstation with a user whose Desktop / Documents / Pictures are redirected to a share, and a work account signed in to OneDrive:
+
+- [ ] While the user is in scope of the redirection GPO, `check` (as the user) lists the folders and the GPO by name under "Folder Redirection policies applied", and says the move is not offered because the policy still applies. No card appears.
+- [ ] Within a minute of the setting going on, `KFMSilentOptIn` appears under `HKLM\SOFTWARE\Policies\Microsoft\OneDrive` with the tenant (event 6101). With your own GPO or Intune value already there, it's left alone (6103).
+- [ ] Take the user out of scope, `gpupdate` (a second `gpupdate` or a sign-in may be needed before Windows drops the record). `check` shows no policy applied and "OFFERED"; the **Back up your folders to OneDrive** card appears.
+- [ ] **Move to OneDrive (admin)**: approve. Every redirected folder (including the Local Documents / Pictures aliases) now points at `C:\Users\<user>\...` in the registry; Explorer restarts; OneDrive restarts and moves Desktop, Documents and Pictures into OneDrive (they show in OneDrive's "Manage backup"). `Where are my files.txt` is on the Desktop and lists the share paths. Event 6104 lists every old and new path.
+- [ ] With `MigrationShortcutName` / `MigrationShortcutTarget` set (e.g. `Network Drive` / `U:\` or `\\server\users\%USERNAME%`), that shortcut is on the Desktop, opens the right place, and the result card mentions it.
+- [ ] The files on the share are untouched.
+- [ ] On an RDS / AVD host the card never appears and the service never sets the policy (it removes one it set earlier).
+- [ ] Turning the setting off removes only the policy values OneDrive Helper set (6102); OneDrive keeps backing up folders it already moved.
+
+## 10. Uninstall
 
 - [ ] `uninstall --purge` removes the service, `HKLM\SOFTWARE\OneDriveHelper` and `%ProgramData%\OneDriveHelper\logo.png`.
+- [ ] `uninstall` (with or without `--purge`) removes the `KFMSilentOptIn` values OneDrive Helper set, and leaves any set by your own policy.

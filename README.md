@@ -2,9 +2,17 @@
 
 A small Windows tool that keeps an eye on OneDrive for your users, and tells them (and you) when something has quietly gone wrong.
 
-**Current version: 0.10.5** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
+**Current version: 0.11.0** ([download](https://github.com/denismcapple/OneDriveHelper/releases/latest) · [release notes for every version](https://github.com/denismcapple/OneDriveHelper/releases)). To see which version a PC is running, hover over the OneDrive Helper icon next to the clock, or run `"C:\Program Files\OneDriveHelper\OneDriveHelper.exe" version`.
 
-> **Latest update (0.10.5): what we learned fixing a stubborn folder on a Remote Desktop server.** A leftover library copy on an RDS session host couldn't be moved or deleted by anyone, administrators included, and a restart didn't help. Two separate things were blocking it: Windows still had the folder registered as a OneDrive sync folder (stored on the folder itself, with nothing left in the registry), and OneDrive had made every copy from that read-only library undeletable. The fix now clears both by itself, as the user, with no extra admin step. The "your support team will need to add … back" line is gone from the result too. See [What we learned on Remote Desktop servers](#what-we-learned-on-remote-desktop-servers).
+> **Latest update (0.11.0):**
+> * **Moving users from Folder Redirection to OneDrive backup.** Once a user is no longer in scope of your redirection GPO, they're offered to move their folders back to the PC and have OneDrive back them up. Their old files stay on the share; a note, and optionally a shortcut such as **Network Drive**, on the Desktop shows where. Workstations only. See [Moving users from Folder Redirection to OneDrive backup](#moving-users-from-folder-redirection-to-onedrive-backup).
+> * **OneDrive problems brought to the user's attention.** Sign-in needed, sync errors and conflicts, sync paused or offline, and a OneDrive that has stopped responding, which OneDrive only shows on its own icon. The alert shows OneDrive's own message and button. See [When OneDrive itself has a problem](#when-onedrive-itself-has-a-problem).
+> * **Optional self-service fixes.** A new setting, `RequireAdminApproval`, lets users fix their own folders without an administrator.
+> * A wider, shorter settings window that fits laptop screens, `check` showing the new information, and a fix that no longer stops if antivirus briefly holds its progress file.
+>
+> The new features are off by default. The folder move has been through one real migration so far, and the OneDrive problem alerts haven't yet been seen with a real sync error, so pilot them on a few PCs first.
+>
+> **0.10.5: what we learned fixing a stubborn folder on a Remote Desktop server.** A leftover library copy on an RDS session host couldn't be moved or deleted by anyone, administrators included, and a restart didn't help. Two separate things were blocking it: Windows still had the folder registered as a OneDrive sync folder (stored on the folder itself, with nothing left in the registry), and OneDrive had made every copy from that read-only library undeletable. The fix now clears both by itself, as the user, with no extra admin step. The "your support team will need to add … back" line is gone from the result too. See [What we learned on Remote Desktop servers](#what-we-learned-on-remote-desktop-servers).
 >
 > **0.10.2: simpler, clearer messages.** Every card now says each thing once: what's wrong, then one line per group saying what the fix will do, then each folder's name with its path once in small print. Folder paths are underlined: click one to open it in Explorer. The fix result is a single card that lists only the folders that couldn't be fixed, with what stopped them in bold. The administrator approval is laid out the same way, with each folder's size in small print.
 >
@@ -38,7 +46,9 @@ We got tired of finding out about these the hard way, so we wrote something that
   Personal OneDrive folders (`OneDrive`, `OneDrive - Something`) are never flagged.
 * **Explains it in plain English.** Every alert has a **What does this mean?** link written for people who don't know or care how OneDrive works.
 * **Makes it easy to get help.** **Contact support** offers to e-mail your service desk with a full diagnostic report already in the message, or to open your support website.
-* **Fixes broken folders safely**, after an administrator approves. It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again (unless it's an old copy of a library that already syncs elsewhere, or from an account that's no longer connected). If anything is in doubt, nothing is deleted and the folder goes back where it was. If files are locked by a program that won't let go, it can offer a restart (or, on Remote Desktop and virtual desktops, a sign-out) and finish the fix by itself when the user signs in again, even on a different session host.
+* **Tells users about problems OneDrive only shows on its own icon** (optional): sign-in needed, sync errors and conflicts, sync paused or offline, or OneDrive not responding. The alert's button does what OneDrive's own button would, or restarts a hung OneDrive.
+* **Moves users from Folder Redirection to OneDrive backup** (optional, workstations only): once your redirection policy no longer applies to a user, it points their folders back to the PC so OneDrive can back them up.
+* **Fixes broken folders safely**, after an administrator approves (or, if you allow it, by the user themselves). It moves the folder aside, saves a copy of every file stored on the PC, deletes only the files it has proven it saved, then asks OneDrive to sync the library again (unless it's an old copy of a library that already syncs elsewhere, or from an account that's no longer connected). If anything is in doubt, nothing is deleted and the folder goes back where it was. If files are locked by a program that won't let go, it can offer a restart (or, on Remote Desktop and virtual desktops, a sign-out) and finish the fix by itself when the user signs in again, even on a different session host.
 * **Puts a status icon in the system tray**, so when a user rings you, you can see straight away what's wrong, even if they closed the alert.
 * **Writes everything to the Windows event log**, so your RMM can raise a ticket or alert you.
 * **Can be branded per customer**: company name, logo, support contact, colours and wording, all set from a settings file you push out with your RMM.
@@ -90,7 +100,7 @@ Questions and messages (the fix confirmation and its result, the administrator a
 
 <img src="docs/images/tray-icons.png" width="160" alt="Tray icons: green tick, amber and red exclamation marks">
 
-Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.10.5 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
+Hover over it to see the version and a one-line summary, for example "AcmeCorp - OneDrive Helper v0.11.0 / Everything looks good". Click it to see the status window (the screenshot at the top of this page), which also lists any fix that didn't finish. Right-click for:
 
 * show status
 * show alerts again
@@ -100,6 +110,69 @@ Hover over it to see the version and a one-line summary, for example "AcmeCorp -
 * copy details for support
 * open saved files
 * the version number
+
+### When OneDrive itself has a problem
+
+With `OneDriveIssueAlerts` on, the tool also watches what OneDrive reports about its own state. These problems normally only show as a small mark on OneDrive's icon next to the clock, which most users never notice:
+
+* **OneDrive needs you to sign in again**
+* **sync errors and conflicts**: files OneDrive can't sync
+* **sync paused, or offline**
+* **OneDrive has stopped responding**: it's running, but not syncing, and files that are only in the cloud won't open
+
+<img src="docs/images/alert-onedrive-problem.png" width="477" alt="OneDrive needs your attention alert with OneDrive's own View sync issues button">
+
+The alert, **OneDrive needs your attention**, shows OneDrive's own words, for example "You have 3 sync issues", and the libraries affected. Its main button:
+* runs **OneDrive's own command**, as Explorer would, for example **Sign in** or **View sync issues**;
+* or **Restart OneDrive**, if it has stopped responding.
+
+To avoid false alarms:
+* errors and a hung OneDrive must last about 2 minutes before the user is told;
+* paused, offline and not connected must last 30 minutes (`IssueAlertGraceMinutes`), because OneDrive pauses by itself on metered networks and while signing in.
+
+It's only checked while OneDrive is running; the "OneDrive is not running" alert covers the rest. The alert can be ignored like the others, and a different problem brings it back.
+
+**What Windows provides:**
+* **Windows 11 and Server 2025:** OneDrive reports its full status to Windows. That's the same status File Explorer's Home page shows, and it's what the alert uses.
+* **Windows 10, Server 2019 and Server 2022:** Windows only knows whether OneDrive is connected to each library, or has an error, or has lost its connection. The alert then says which libraries are affected and offers **Open OneDrive**. Individual sync conflicts can't be detected on these versions.
+
+Events 6001 (a problem was found), 6002 (resolved), 6003 (not responding) and 6004 (restarted from the alert) record what happened. `OneDriveHelper.exe check` shows the status OneDrive is reporting right now.
+
+### Moving users from Folder Redirection to OneDrive backup
+
+This is for moving a customer from Folder Redirection, where Desktop and Documents live on `\\server\users\%username%`, to OneDrive backing up those folders (Known Folder Move). Normally you'd do this for each user by hand:
+1. take them out of scope of the redirection GPO;
+2. run `gpupdate`;
+3. point each folder back to `C:\Users\<user>`;
+4. then turn on OneDrive's folder backup.
+
+With `FolderRedirectionMigration` on, OneDrive Helper handles steps 3 and 4 for you once you've done steps 1 and 2.
+
+**When it's offered.** All of these must be true:
+* this is a **workstation**. It's never offered on Remote Desktop, Azure Virtual Desktop, Citrix, VMware Horizon or FSLogix hosts;
+* some of the user's folders still point outside their profile;
+* **no Folder Redirection policy applies to the user any more**. The tool asks `gpresult` for the user's Resultant Set of Policy, at most every 15 minutes and only for users whose folders are still redirected. A GPO counts if it is applied (valid, enabled, not filtered out by security, with an enabled link) and contains Folder Redirection settings, which is exactly what `gpresult /r` lists under "Applied Group Policy Objects". While one applies, nothing is offered, because Windows would just redirect the folders again at the next sign-in;
+* a **work account is signed in to OneDrive**;
+* OneDrive's **`KFMSilentOptIn`** backup policy is set. The service sets it for you, see below.
+
+<img src="docs/images/alert-move-to-onedrive.png" width="477" alt="Back up your folders to OneDrive card">
+
+**What the user sees.** A card says their Desktop, Documents and Pictures are still on a network drive and can be backed up to OneDrive. If they click **Move to OneDrive**, and an administrator approves when `RequireAdminApproval` is on:
+1. **every redirected folder** is pointed back to its normal place in their profile, using Windows' own API, and the local folder is created if needed. That includes Music, Downloads, Favorites, AppData and the rest, as well as Desktop, Documents and Pictures;
+2. a note, **"Where are my files.txt"**, is left on their Desktop. It lists each folder and the network folder where their old files still are. You can change the wording with `MigrationNoteText`. If you set `MigrationShortcutName` and `MigrationShortcutTarget`, a shortcut such as **Network Drive** → `U:\` is put next to it, so users can get to their old files in one click;
+3. Explorer is restarted, so open Explorer windows close and the taskbar reloads. Then OneDrive is restarted, so it applies the backup policy straight away. OneDrive then moves Desktop, Documents and Pictures into OneDrive and backs them up.
+
+**Files are not copied.** The user's old files stay on the share, and their local folders start empty apart from the note. Move the data across separately, for example with a script or by asking users to copy what they need. If AppData (Roaming) was redirected too, the user's app settings stay on the share, and apps start fresh until you copy them back. A folder the tool doesn't recognise is left alone and listed in the note and the event.
+
+**The backup policy.** While `FolderRedirectionMigration` is on, the service sets OneDrive's machine-wide `KFMSilentOptIn` policy on workstations, as a GPO would, plus `KFMSilentOptInWithNotification`.
+* **Tenant:** `KFMTenantID`, or, if that's blank, the tenant of the work account signed in to OneDrive on the PC. It won't guess if users from several tenants are signed in.
+* **Other users:** it applies to everyone who uses the PC, so OneDrive also backs up anyone whose folders are already local.
+* **Your own policy wins:** if your GPO or Intune already sets `KFMSilentOptIn`, OneDrive Helper never changes or removes it.
+* **Removal:** turning the feature off, or uninstalling, removes only the values OneDrive Helper set. OneDrive keeps backing up folders it has already moved.
+
+Events: 6101 (policy set), 6102 (removed), 6103 (couldn't be set, and why), 6104 (a user's folders were moved, with every old and new path) and 6105 (some folders couldn't be moved). `OneDriveHelper.exe check`, run as the user, shows every redirected folder, which redirection policies apply, and whether the move would be offered, and if not, why not.
+
+**Testing:** this has been through one real migration: a domain workstation whose Desktop, Documents and Pictures were redirected to a file server. `check` named the redirection GPO while the user was in scope and showed none once the link was disabled, and the move then pointed all the folders back for OneDrive to back up. It's still early: try it on a few PCs first, and run `check` before and after `gpupdate`.
 
 ## How the fix works
 
@@ -315,10 +388,18 @@ Settings live in `HKLM\SOFTWARE\OneDriveHelper`. Changes are picked up within a 
 | `AutoRestartAttempts` | `3` | How many automatic restarts to try, about 30 seconds apart, before warning the user (1 to 10). It's also the most automatic restarts allowed in any 30 minutes |
 | `IgnoreOptions` | `5m,30m,reboot` | Choices in the Ignore menu. Durations from 1m to 24h, and/or `reboot`. Leave it empty to remove the Ignore button |
 | `OrphanCheckEnabled` | `1` | Turn the "folders not syncing" check on or off |
-| `RemediationEnabled` | `1` | Offer the **Fix (admin)** button |
+| `RemediationEnabled` | `1` | Offer the **Fix** button |
+| `RequireAdminApproval` | `1` | Every fix (and moving folders to OneDrive) needs an administrator to approve it through UAC after the user confirms, and the button says **Fix (admin)**. Set it to `0` to let users fix their own folders: their confirmation is enough, and event 5001 records who confirmed it. The file work runs as the user either way |
 | `RestartToFinish` | `1` | When files are locked, offer a restart (single-user workstations) or a sign-out (Remote Desktop and virtual desktops), and finish the fix at the next sign-in; see [When files are locked](#when-files-are-locked) |
 | `BackupRoot` | `{Profile}\ODHelper\Saved` | Where the fix saves files. `{Profile}` is the user's profile folder |
 | `FreeSpaceMarginMB` | `1024` | Extra free space the fix insists on, on top of the files being saved |
+| `OneDriveIssueAlerts` | `0` | Alert users about problems OneDrive reports (sign-in, sync errors and conflicts, paused, offline, not responding); see [When OneDrive itself has a problem](#when-onedrive-itself-has-a-problem) |
+| `IssueAlertGraceMinutes` | `30` | How long paused, offline or not connected must last before the user is alerted (1 to 1440). Errors and a hung OneDrive are reported after about 2 minutes |
+| `FolderRedirectionMigration` | `0` | On workstations, offer to move redirected folders back to the PC for OneDrive backup once no redirection policy applies, and set OneDrive's `KFMSilentOptIn` policy; see [Moving users from Folder Redirection to OneDrive backup](#moving-users-from-folder-redirection-to-onedrive-backup) |
+| `KFMTenantID` | (empty) | Tenant ID for `KFMSilentOptIn`. Empty means the tenant of the work account signed in to OneDrive on the PC. Setting it is recommended: the signed-in user's OneDrive settings are user-editable, although they can only point backup at a tenant the user is signed in to |
+| `MigrationShortcutName` | (empty) | Name of a shortcut put on the user's Desktop after the move, for example `Network Drive`. Empty means no shortcut |
+| `MigrationShortcutTarget` | (empty) | What that shortcut opens: a drive or folder, for example `U:\` or `\\fs01\users\%USERNAME%`. Variables such as `%USERNAME%` are filled in for the user |
+| `MigrationNoteText` | (built in) | Your own wording for the "Where are my files.txt" note. `{folders}` is replaced by the list of folders and where their old files are |
 | `TrayIconEnabled` | `1` | Show the tray icon |
 | `PopupSound` | `1` | Play the Windows warning sound when an alert appears |
 | `CheckIntervalSeconds` | `60` | How often each user's checks run |
@@ -342,15 +423,15 @@ RMM agents run scripts as SYSTEM, which already has the admin rights the install
 
 ### Install script (PowerShell)
 
-This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.10.5; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
+This works in NinjaOne, Datto RMM, N-able, ConnectWise Automate, Atera, Kaseya, Intune platform scripts and anything else that can run PowerShell as SYSTEM. It's filled in for v0.11.0; for a later release, change the version and copy the two checksums from that release's `SHA256SUMS.txt`. Paste your customer's settings into the JSON block.
 
 ```powershell
 # OneDrive Helper: install or upgrade with customer settings
 $ErrorActionPreference = 'Stop'
-$Version = 'v0.10.5'
+$Version = 'v0.11.0'
 $Hashes  = @{                       # from SHA256SUMS.txt on the release page
-    'x64'   = 'F5CDF27797F6470F7E8A8EB8243DE3F830D1ABC2CC9AF3CCBC4BC2D7E53986EA'
-    'arm64' = '140071E49E095A6E0A7D67FA8CB948FCD2AA64CD16A1B4100AF7752BE0062BAC'
+    'x64'   = 'EF1E388B50F79B1E287D0D4D632A4FC11E0F1E32D9520844687F53D69E984C86'
+    'arm64' = '204809989F35AE1A6DEA15768DD444E7E08FBC932E44AD4AF859643BCE6BD235'
 }
 $Settings = @'
 {
@@ -446,6 +527,9 @@ Everything important goes to the **Application** event log under the source **On
 | 5003 | Error | A fix failed: a file couldn't be saved or verified, or a delete stopped part-way (the message lists what wasn't removed) |
 | 5007 | Warning | An interrupted fix needs attention: a folder is not where it was (both paths are in the message) |
 | 5012 | Warning | A folder was kept in the `ODHelper\Fixing` area because it couldn't be put back safely (the path is in the message) |
+| 6001 | Warning | OneDrive reports a problem for a user (sign-in, sync errors, paused, offline); the message has OneDrive's text and the libraries |
+| 6003 | Warning | OneDrive is running but has stopped responding; the user was offered a restart |
+| 6105 | Warning | Some of a user's redirected folders couldn't be moved back to the PC |
 | 1003 | Error | The installer stopped a user part while a fix was running (after waiting 30 minutes) |
 | 1101 | Error | The service couldn't start the user part in a session |
 
@@ -462,7 +546,7 @@ And for information, if you want the full picture:
 | 3004 | Information | OneDrive is running again |
 | 3005 | Information | OneDrive had stopped and was restarted automatically (with the attempt number) |
 | 4002 | Information | No more broken folders |
-| 5001 | Information | A fix was approved (who approved it, and the plan) |
+| 5001 | Information | A fix (or moving folders to OneDrive) was approved: who approved it and the plan. With `RequireAdminApproval` off, it says the user confirmed it themselves |
 | 5011 | Information | The approved fix started working on the files (use this, not 5001, for "a fix ran") |
 | 5002 | Information | A fix completed: every folder was removed after saving it |
 | 5004 | Information | A fix was declined at the approval step |
@@ -477,6 +561,12 @@ And for information, if you want the full picture:
 | 5015 | Information | A fix that waited for the user to sign in again is being finished (when and on which computer it was approved, and the folders) |
 | 5016 | Warning | A folder was skipped because Windows still has it registered as a OneDrive sync folder and the registration could not be removed |
 | 5017 | Information | A folder was still registered with Windows as a OneDrive sync folder, with nothing connected to it; the dead registration was removed so it could be fixed |
+| 6002 | Information | OneDrive no longer reports a problem |
+| 6004 | Information | The user restarted OneDrive from the problem alert |
+| 6101 | Information | The service set OneDrive's `KFMSilentOptIn` policy (with the tenant) |
+| 6102 | Information | The service removed the `KFMSilentOptIn` policy it had set |
+| 6103 | Information / Warning | `KFMSilentOptIn` wasn't set: no work account signed in yet, users from several tenants, or another policy already sets it |
+| 6104 | Information | A user's redirected folders were moved back to the PC for OneDrive backup (every old and new path, and who approved it) |
 | 3007 | Warning | The list of running programs couldn't be read 5 checks in a row, so OneDrive Helper can't tell whether OneDrive is running (no restart or alert happens while it can't tell) |
 
 A fix where folders were only skipped, kept or left alone logs those per-folder events, not 5003.

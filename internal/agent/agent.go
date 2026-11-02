@@ -22,6 +22,7 @@ import (
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
+	"github.com/denismcapple/OneDriveHelper/internal/migrate"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/popup"
 	"github.com/denismcapple/OneDriveHelper/internal/remediate"
@@ -64,9 +65,16 @@ type Agent struct {
 	lastRunning   time.Time   // last time OneDrive was seen running
 	unknownStreak int         // failed process listings in a row
 	orphanKey     string
-	fixing        bool
-	last          Status // latest check, for the tray menu and explanations
-	staleSince    map[string]time.Time
+	issues        tracker
+	issueKey      string
+	observe       func(sid string) []Observation // OneDrive's problems (replaceable in tests)
+	migrateKey    string
+	migrateWhy    string
+	// migrationCheck decides whether to offer moving folders to OneDrive (replaceable in tests).
+	migrationCheck func(cfg config.Config) (*migrate.Offer, string)
+	fixing         bool
+	last           Status // latest check, for the tray menu and explanations
+	staleSince     map[string]time.Time
 }
 
 // staleNavGrace is how long an Explorer entry must point at a missing folder
@@ -324,6 +332,8 @@ func (a *Agent) actions() Actions {
 		Fix:         a.safe("fix", a.fix),
 		Explain:     func(topic string) { a.safe("explain", func() { a.explain(topic) })() },
 		CopyDetails: a.safe("copy details", a.copyDetails),
+		OneDrive:    func(p Problem) { a.safe("OneDrive problem", func() { a.fixIssue(p) })() },
+		Migrate:     a.safe("move folders to OneDrive", a.migrate),
 	}
 }
 
@@ -369,6 +379,8 @@ func (a *Agent) tick(cfg config.Config, now time.Time) {
 	} else {
 		a.ui.Hide(idOrphans)
 	}
+	s.Issues = a.checkIssues(cfg, now, s.Configured && s.Running && !s.Unknown && !s.Updating)
+	s.Migration = a.checkMigration(cfg, now)
 	a.mu.Lock()
 	s.MissingSince = a.missingSince
 	a.last = s
@@ -509,15 +521,15 @@ func (a *Agent) relaunch() {
 	a.ev.Info(elog.OneDriveRelaunched, "OneDrive was restarted by "+a.user+" from the OneDrive Helper alert.")
 }
 
-var alertNames = map[string]string{idNotRunning: "OneDrive not running", idOrphans: "folders not syncing"}
+var alertNames = map[string]string{idNotRunning: "OneDrive not running", idOrphans: "folders not syncing", idIssues: "OneDrive needs your attention"}
 
 func (a *Agent) snooze(alert, d string) {
 	if err := SetSnooze(a.hive, alert, d, time.Now()); err != nil {
 		a.log.Printf("snooze %s: %v", alert, err)
 		return
 	}
-	if alert == idOrphans {
-		a.ui.Hide(idOrphans)
+	if alert == idOrphans || alert == idIssues {
+		a.ui.Hide(alert)
 	}
 	a.log.Printf("alert %q ignored (%s)", alert, d)
 	a.ev.Info(elog.OneDriveAlertSnoozed, fmt.Sprintf("%s chose to ignore the '%s' alert (%s).", a.user, alertNames[alert], config.IgnoreLabel(d)))
@@ -690,7 +702,7 @@ func ShowPreview(ui *popup.Manager, cfg config.Config, orphans []onedrive.Orphan
 		Support:  note("Contact support: " + cfg.SupportContact()),
 		Email:    note("Send an e-mail to " + cfg.SupportEmailAddress()),
 		Website:  note("Visit the support website: " + cfg.SupportWebsite()),
-		Fix:      note("Fix (admin)"),
+		Fix:      note(cfg.FixLabel()),
 		Explain: func(topic string) {
 			wg.Add(1)
 			defer wg.Done()

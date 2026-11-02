@@ -2,6 +2,7 @@ package remediate
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -105,7 +106,15 @@ func writeFileAtomic(path string, b []byte) error {
 	}
 	from, _ := windows.UTF16PtrFromString(winapi.LongPath(tmp))
 	to, _ := windows.UTF16PtrFromString(winapi.LongPath(path))
-	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	// Antivirus or the search indexer may have the old file open for a
+	// moment (replacing it then fails with access denied): try again briefly.
+	for i := 0; ; i++ {
+		err = windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+		if err == nil || i == 20 || !(errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_SHARING_VIOLATION)) {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // LoadJournal reads a journal file.

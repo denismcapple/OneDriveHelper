@@ -13,6 +13,7 @@ const (
 	topicNotRunning = "not-running"
 	topicOrphans    = "orphans"
 	topicStatus     = "status"
+	topicIssues     = "issues"
 )
 
 const explainTitle = "What does this mean?"
@@ -42,6 +43,16 @@ func Explain(c config.Config, topic string, orphans []onedrive.Orphan) string {
 			"WHAT SHOULD I DO?\n" +
 			"Click 'Restart OneDrive'. It takes a few seconds, it is completely safe, and you won't lose anything. " +
 			"If this message keeps coming back: " + c.SupportContact()
+	case topicIssues:
+		return "WHAT HAS HAPPENED?\n" +
+			"OneDrive, the program that copies your work files to the cloud, has run into a problem it can't sort out by itself. " +
+			"It only shows this as a small mark on its icon next to the clock, which is easy to miss, so we're showing it here.\n\n" +
+			"WHY DOES IT NEED FIXING?\n" +
+			"Until it is sorted out, some or all of your changes are not being copied to the cloud: they aren't backed up, and colleagues don't see them.\n\n" +
+			"WHAT SHOULD I DO?\n" +
+			"Click the button at the bottom right. It does what OneDrive's own button would (for example, sign in again, or show the files it can't sync), " +
+			"or restarts OneDrive if it has stopped responding. That is safe and you won't lose anything. " +
+			"If you're not sure what OneDrive is asking, or the message keeps coming back: " + c.SupportContact()
 	case topicOrphans:
 		var list strings.Builder
 		moved, gone := false, false
@@ -75,7 +86,7 @@ func Explain(c config.Config, topic string, orphans []onedrive.Orphan) string {
 			"•  If this computer breaks, is lost, stolen or replaced, anything saved there is lost.\n\n" +
 			"WHAT SHOULD I DO?\n" +
 			"For now, avoid saving new work in these folders. " + c.SupportContact() + " " +
-			"If your support team asks you to, click 'Fix (admin)': it saves a copy of all your files first, so nothing is lost."
+			"If your support team asks you to, click '" + c.FixLabel() + "': it saves a copy of all your files first, so nothing is lost."
 	default:
 		return "This window shows whether OneDrive is working properly on this computer.\n\n" +
 			"OneDrive copies your work files to the cloud, so they are backed up and shared with your colleagues. " +

@@ -14,6 +14,7 @@ import (
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
+	"github.com/denismcapple/OneDriveHelper/internal/kfm"
 	"github.com/denismcapple/OneDriveHelper/internal/logx"
 	"github.com/denismcapple/OneDriveHelper/internal/version"
 )
@@ -231,6 +232,13 @@ func Uninstall(purge bool, logf func(string, ...any)) error {
 		ev.Close()
 	}
 	_ = elog.Remove()
+	// Nothing would manage OneDrive's backup policy any more (OneDrive keeps
+	// backing up folders it already moved).
+	if changed, err := kfm.Remove(); changed {
+		logf("Removed OneDrive's KFMSilentOptIn policy that OneDrive Helper had set")
+	} else if err != nil {
+		logf("Removing OneDrive's KFMSilentOptIn policy: %v", err)
+	}
 	if purge {
 		_ = deleteTree(registry.LOCAL_MACHINE, config.KeyPath)
 		_ = os.Remove(config.InstalledLogo())

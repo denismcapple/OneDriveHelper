@@ -54,11 +54,23 @@ type Config struct {
 	IgnoreOptions               string `reg:"IgnoreOptions" def:"5m,30m,reboot" label:"'Ignore' choices" help:"Choices in every alert's Ignore menu (each alert is ignored separately). Comma-separated: durations like 5m, 30m, 2h, and/or 'reboot' (until next restart). Empty = no Ignore button."`
 
 	// Library sync check
-	OrphanCheckEnabled bool   `reg:"OrphanCheckEnabled" def:"1" label:"Alert when a library stops syncing" help:"Alert when a library folder exists on disk but is no longer synced."`
-	RemediationEnabled bool   `reg:"RemediationEnabled" def:"1" label:"Offer 'Fix (admin)'" help:"Offer the admin-approved fix for libraries that stopped syncing."`
-	RestartToFinish    bool   `reg:"RestartToFinish" def:"1" label:"Offer a restart or sign-out to finish a fix" help:"When files in a folder are in use and can't be released, offer the user a restart (single-user workstations) or a sign-out (Remote Desktop / Azure Virtual Desktop / Citrix / VMware Horizon / FSLogix, or with someone else signed in). The fix finishes by itself at their next sign-in, on any computer or session host they use (within 3 days, no second approval)."`
-	BackupRoot         string `reg:"BackupRoot" def:"{Profile}\\ODHelper\\Saved" label:"Save files to" help:"Where the fix saves files; {Profile} = the user's profile folder. Each run creates <this>\\<date-time>\\<Library>."`
-	FreeSpaceMarginMB  int    `reg:"FreeSpaceMarginMB" def:"1024" min:"0" max:"1048576" label:"Extra free space required (MB)" help:"Free space required on top of the data being saved."`
+	OrphanCheckEnabled   bool   `reg:"OrphanCheckEnabled" def:"1" label:"Alert when a library stops syncing" help:"Alert when a library folder exists on disk but is no longer synced."`
+	RemediationEnabled   bool   `reg:"RemediationEnabled" def:"1" label:"Offer the 'Fix' button" help:"Offer the fix for libraries that stopped syncing (it saves a copy of every file first)."`
+	RequireAdminApproval bool   `reg:"RequireAdminApproval" def:"1" label:"Require administrator approval for fixes" help:"On: every fix needs an administrator to approve it (UAC) after the user confirms. Off: users can fix their own folders; their confirmation is enough and the event log records who confirmed it. The file work runs as the user either way."`
+	RestartToFinish      bool   `reg:"RestartToFinish" def:"1" label:"Offer a restart or sign-out to finish a fix" help:"When files in a folder are in use and can't be released, offer the user a restart (single-user workstations) or a sign-out (Remote Desktop / Azure Virtual Desktop / Citrix / VMware Horizon / FSLogix, or with someone else signed in). The fix finishes by itself at their next sign-in, on any computer or session host they use (within 3 days, no second approval)."`
+	BackupRoot           string `reg:"BackupRoot" def:"{Profile}\\ODHelper\\Saved" label:"Save files to" help:"Where the fix saves files; {Profile} = the user's profile folder. Each run creates <this>\\<date-time>\\<Library>."`
+	FreeSpaceMarginMB    int    `reg:"FreeSpaceMarginMB" def:"1024" min:"0" max:"1048576" label:"Extra free space required (MB)" help:"Free space required on top of the data being saved."`
+
+	// OneDrive problem alerts
+	OneDriveIssueAlerts    bool `reg:"OneDriveIssueAlerts" def:"0" label:"Alert about OneDrive problems" help:"Alert users about problems OneDrive only shows on its icon: sign-in needed, sync errors and conflicts, paused or offline, or not responding. The alert shows OneDrive's own message and button (e.g. 'Sign in'). Windows 10 and Server 2019/2022 report less: libraries not connected or with a problem, and no individual conflicts."`
+	IssueAlertGraceMinutes int  `reg:"IssueAlertGraceMinutes" def:"30" min:"1" max:"1440" label:"Paused / offline grace (minutes)" help:"Sync paused, offline or not connected must last this long before the user is alerted (OneDrive pauses by itself on metered networks and while signing in). Errors and a OneDrive that has stopped responding are reported after about 2 minutes."`
+
+	// Folder Redirection -> OneDrive backup
+	FolderRedirectionMigration bool   `reg:"FolderRedirectionMigration" def:"0" label:"Offer to move redirected folders to OneDrive" help:"Workstations only. Once no Folder Redirection policy applies to a user, offer to point their redirected folders back to their profile so OneDrive backs up Desktop, Documents and Pictures. Files stay on the share (a Desktop note says where). The service also sets OneDrive's KFMSilentOptIn policy on the PC (never over your own), which backs up other users' local folders too."`
+	KFMTenantID                string `reg:"KFMTenantID" def:"" label:"Microsoft 365 tenant ID" help:"The tenant for OneDrive's KFMSilentOptIn policy, e.g. 11111111-2222-3333-4444-555555555555. Blank = the tenant of the work account signed in to OneDrive on the PC (nothing is set while there is none, or if signed-in users belong to different tenants)."`
+	MigrationShortcutName      string `reg:"MigrationShortcutName" def:"" label:"Desktop shortcut name" help:"Name of a shortcut put on the user's Desktop after the move, so they can get to their old files quickly, e.g. 'Network Drive'. Blank = no shortcut."`
+	MigrationShortcutTarget    string `reg:"MigrationShortcutTarget" def:"" label:"Desktop shortcut opens" help:"What the Desktop shortcut opens: a drive or folder, e.g. U:\\ or \\\\fs01\\users\\%USERNAME%. Variables such as %USERNAME% are filled in for the user. It doesn't have to be reachable when the shortcut is made."`
+	MigrationNoteText          string `reg:"MigrationNoteText" def:"" kind:"multiline" label:"'Where are my files' note" help:"Text of the note left on the user's Desktop after the move. {folders} is replaced by the list of folders and where their old files are. Blank = the built-in wording."`
 
 	// General
 	TrayIconEnabled      bool `reg:"TrayIconEnabled" def:"1" label:"Show a tray icon" help:"Status icon in the notification area: click for what needs fixing, right-click for actions and diagnostic details for support."`
@@ -67,7 +79,17 @@ type Config struct {
 	AgentWatchdogSeconds int  `reg:"AgentWatchdogSeconds" def:"30" min:"5" max:"3600" label:"Service watchdog (seconds)" help:"How often the service makes sure each user's agent is running."`
 }
 
+// FixLabel is the fix button's text: "Fix (admin)" when an administrator has
+// to approve it, otherwise "Fix".
+func (c Config) FixLabel() string {
+	if c.RequireAdminApproval {
+		return "Fix (admin)"
+	}
+	return "Fix"
+}
+
 func (c Config) CheckInterval() time.Duration { return secs(c.CheckIntervalSeconds, 10) }
+func (c Config) IssueGrace() time.Duration    { return mins(c.IssueAlertGraceMinutes) }
 func (c Config) OneDriveGrace() time.Duration { return secs(c.OneDriveMissingGraceSeconds, 0) }
 func (c Config) Watchdog() time.Duration      { return secs(c.AgentWatchdogSeconds, 5) }
 
@@ -188,7 +210,10 @@ func plural(f string, n int) string {
 	return s
 }
 
-var hexColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+var (
+	hexColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+	tenantID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+)
 
 // Validate checks every setting and returns all problems found.
 func (c Config) Validate() error {
@@ -239,6 +264,19 @@ func (c Config) Validate() error {
 	}
 	if b := c.BackupDir(`C:\Users\user`); strings.TrimSpace(c.BackupRoot) == "" || !filepath.IsAbs(b) || len(b) <= 3 {
 		errs = append(errs, fmt.Errorf("BackupRoot must be an absolute folder (or start with {Profile}), got %q", c.BackupRoot))
+	}
+	if t := strings.Trim(strings.TrimSpace(c.KFMTenantID), "{}"); t != "" && !tenantID.MatchString(t) {
+		errs = append(errs, fmt.Errorf("KFMTenantID must be a tenant ID like 11111111-2222-3333-4444-555555555555 (got %q)", c.KFMTenantID))
+	}
+	if n, t := strings.TrimSpace(c.MigrationShortcutName), strings.TrimSpace(c.MigrationShortcutTarget); (n == "") != (t == "") {
+		errs = append(errs, errors.New("the Desktop shortcut needs both a name and what it opens (or leave both blank)"))
+	} else if n != "" && strings.Trim(strings.Map(func(r rune) rune {
+		if strings.ContainsRune(`\/:*?"<>|`, r) {
+			return -1
+		}
+		return r
+	}, n), ". ") == "" {
+		errs = append(errs, fmt.Errorf("MigrationShortcutName %q can't be used as a file name", n))
 	}
 	if c.LogoFile != "" {
 		if _, _, err := CheckLogo(c.LogoPath()); err != nil {

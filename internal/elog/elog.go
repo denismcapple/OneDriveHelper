@@ -67,6 +67,24 @@ const (
 	FixSkippedCloud = 5016
 	// FixDeadSyncRoot: a folder's dead OneDrive sync registration was removed so it could be fixed.
 	FixDeadSyncRoot = 5017
+	// OneDriveProblem: OneDrive reports a problem (sign-in, sync errors, paused, offline); the user was alerted.
+	OneDriveProblem = 6001
+	// OneDriveProblemsResolved: OneDrive no longer reports a problem.
+	OneDriveProblemsResolved = 6002
+	// OneDriveNotResponding: OneDrive is running but stopped answering; the user was offered a restart.
+	OneDriveNotResponding = 6003
+	// OneDriveRestartedByUser: the user restarted OneDrive from the problem alert.
+	OneDriveRestartedByUser = 6004
+	// KFMPolicySet: the service set OneDrive's KFMSilentOptIn policy (folder redirection migration on).
+	KFMPolicySet = 6101
+	// KFMPolicyRemoved: the service removed the KFMSilentOptIn policy it had set.
+	KFMPolicyRemoved = 6102
+	// KFMPolicyNotSet: the migration is on but the policy can't be set (no or several tenants, another policy).
+	KFMPolicyNotSet = 6103
+	// FoldersMigrated: a user's redirected folders were pointed back to their profile for OneDrive backup.
+	FoldersMigrated = 6104
+	// FolderMigrationFailed: pointing a user's folders back did not fully work.
+	FolderMigrationFailed = 6105
 )
 
 // Log is a best-effort event log writer; a nil or failed log silently drops events.

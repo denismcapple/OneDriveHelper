@@ -5,15 +5,21 @@ package main
 //go:generate go run ../../tools/eventmsgs
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/folders"
+	"github.com/denismcapple/OneDriveHelper/internal/kfm"
+	"github.com/denismcapple/OneDriveHelper/internal/migrate"
+	"github.com/denismcapple/OneDriveHelper/internal/odstatus"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/remediate"
 	"github.com/denismcapple/OneDriveHelper/internal/service"
@@ -38,7 +44,8 @@ Admin commands (run from an elevated prompt):
   config validate <file>  Check a settings file without applying it
 
 Diagnostics (run as the user to check):
-  check                   Show OneDrive status and orphaned library folders
+  check                   Show OneDrive status, orphaned library folders and
+                          redirected folders (and whether moving them is offered)
   remediate --dry-run     Show what the fix would do (no changes)
   version
 `
@@ -154,6 +161,103 @@ func configCmd(args []string) error {
 	return fmt.Errorf("unknown config command %q", args[0])
 }
 
+// checkStatus prints OneDrive's own status for each sync root (Windows 11 /
+// Server 2025), or the Cloud Files driver's provider status elsewhere.
+func checkStatus(sid string) {
+	fmt.Printf("\nOneDrive status (as OneDrive reports it):\n")
+	if winapi.IsElevated() {
+		fmt.Printf("  NOTE: this prompt is elevated. OneDrive answers an elevated program from a separate copy of itself, so\n" +
+			"  the status below may say OneDrive isn't running. Run 'check' from a normal prompt for the real status.\n")
+	}
+	roots, err := odstatus.Read(sid, 10*time.Second)
+	if err == nil && len(roots) == 0 {
+		fmt.Printf("  no OneDrive folders are registered for this user (OneDrive isn't signed in to an account yet)\n")
+		return
+	}
+	if err == nil {
+		for _, r := range roots {
+			if r.Err != "" {
+				fmt.Printf("  %s: %s\n", r.Name, r.Err)
+				continue
+			}
+			fmt.Printf("  %s: %s - %q", r.Name, r.State, r.Status)
+			if r.Message != "" {
+				fmt.Printf(", %q", r.Message)
+			}
+			if r.Action != "" {
+				fmt.Printf(" [%s]", r.Action)
+			}
+			fmt.Println()
+		}
+		return
+	}
+	fmt.Printf("  %v\n", err)
+	if errors.Is(err, odstatus.ErrUnsupported) {
+		fmt.Printf("  Cloud Files provider status instead (0 = not connected, 1 = idle, 0x40 = no connection, 0xFFFFFFFF = error):\n")
+		for _, p := range onedrive.RegisteredSyncRoots(sid) {
+			if info, err := winapi.SyncRootInfo(p); err == nil {
+				fmt.Printf("    %s: %#x\n", p, info.Status)
+			}
+		}
+	}
+}
+
+// checkRedirection prints what decides whether moving redirected folders to
+// OneDrive backup is offered.
+func checkRedirection(h onedrive.Hive, profile string) {
+	fmt.Printf("\nFolder Redirection:\n")
+	fs, err := folders.Redirected(folders.CurrentUser, profile)
+	if err != nil {
+		fmt.Printf("  folder locations could not be read: %v\n", err)
+	}
+	if len(fs) == 0 && err == nil {
+		fmt.Printf("  no folders point outside the profile\n")
+	}
+	for _, f := range fs {
+		name, note := f.Name, ""
+		switch {
+		case !f.Known():
+			note = "  (unknown folder: left alone)"
+		case f.ID == "":
+			name = f.Name + " (2nd entry)" // Windows' "local" duplicate of the folder
+		}
+		fmt.Printf("  %-22s %s%s\n", name, f.Current, note)
+	}
+	gpos, err := folders.PolicyGPOs("")
+	switch {
+	case err != nil:
+		fmt.Printf("  Folder Redirection policies applied: can't tell (%v)\n", err)
+	case len(gpos) == 0:
+		fmt.Printf("  Folder Redirection policies applied: none\n")
+	default:
+		fmt.Printf("  Folder Redirection policies applied: %s\n", strings.Join(gpos, ", "))
+	}
+	if why := winapi.SharedHostReasons(); len(why) > 0 {
+		fmt.Printf("  Shared or virtual desktop host: %s\n", strings.Join(why, ", "))
+	}
+	t := kfm.Tenant()
+	if t == "" {
+		t = "not set"
+	}
+	fmt.Printf("  OneDrive KFMSilentOptIn policy: %s\n", t)
+	work := "none"
+	for _, a := range onedrive.Accounts(h) {
+		if a.Business() && a.Configured() {
+			if kfm.ValidTenant(a.TenantID) {
+				work = fmt.Sprintf("%s (%s, tenant %s)", a.Key, a.UserEmail, a.TenantID)
+				break
+			}
+			work = a.Key + " is set up but not signed in (no tenant)"
+		}
+	}
+	fmt.Printf("  OneDrive work account: %s\n", work)
+	if o, why := migrate.Check(config.Load(), h.SID, folders.CurrentUser, h, profile); o != nil {
+		fmt.Printf("  Moving %s to OneDrive backup: OFFERED\n", o.Names())
+	} else {
+		fmt.Printf("  Moving folders to OneDrive backup: not offered (%s)\n", why)
+	}
+}
+
 func check() error {
 	h := onedrive.CurrentUserHive()
 	session := winapi.CurrentSessionID()
@@ -206,6 +310,8 @@ func check() error {
 			fmt.Printf("    re-sync IDs unknown\n")
 		}
 	}
+	checkStatus(h.SID)
+	checkRedirection(h, profile)
 	if len(in.ReadErrors) > 0 {
 		fmt.Printf("\nOneDrive data that could not be read (no folder will be fixed until this is resolved):\n")
 		for _, e := range in.ReadErrors {

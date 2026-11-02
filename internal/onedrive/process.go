@@ -2,10 +2,12 @@ package onedrive
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -151,6 +153,44 @@ func OneDriveExe(h Hive) string {
 		}
 	}
 	return ""
+}
+
+// RestartOneDrive asks the user's OneDrive to close (OneDrive.exe /shutdown),
+// waits up to 30 seconds for it to go, then starts it again in the background.
+// It never starts a second copy: if OneDrive is still running it gives up.
+func RestartOneDrive(h Hive, session uint32) error {
+	exe := OneDriveExe(h)
+	if exe == "" {
+		return errors.New("OneDrive.exe could not be found")
+	}
+	cmd := exec.Command(exe, "/shutdown")
+	cmd.Dir = filepath.Dir(exe)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ask OneDrive to close: %w", err)
+	}
+	for i := 0; i < 30; i++ {
+		if OneDriveState(session) == StateNotRunning {
+			return LaunchOneDrive(h)
+		}
+		time.Sleep(time.Second)
+	}
+	return errors.New("OneDrive did not close within 30 seconds")
+}
+
+// OpenOneDrive starts OneDrive.exe without /background, which brings a
+// running OneDrive forward so it can show what it wants (e.g. its sign-in
+// window), or starts it if it isn't running.
+func OpenOneDrive(h Hive) error {
+	exe := OneDriveExe(h)
+	if exe == "" {
+		return errors.New("OneDrive.exe could not be found")
+	}
+	cmd := exec.Command(exe)
+	cmd.Dir = filepath.Dir(exe)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 // LaunchOneDrive starts OneDrive for the current user in the background.

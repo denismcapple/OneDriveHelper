@@ -40,6 +40,7 @@ type handler struct {
 	sessions  map[uint32]*sessionState
 	stopName  string         // per-service-instance event name passed to agents
 	stopEvent windows.Handle // signalled when the service stops so agents exit
+	kfmLast   string         // last outcome of manageKFM (each is logged once)
 }
 
 // createStopEvent creates a uniquely named event that agents (any
@@ -97,6 +98,7 @@ func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 		case <-tick.C:
 			cfg = config.Load()
 			h.reconcile()
+			h.safe("OneDrive backup policy", func() { h.manageKFM(cfg, kfmDefault) })
 			tick.Reset(cfg.Watchdog())
 		case c := <-req:
 			switch c.Cmd {
@@ -119,6 +121,16 @@ func (h *handler) Execute(_ []string, req <-chan svc.ChangeRequest, status chan<
 			}
 		}
 	}
+}
+
+// safe runs f, logging a panic instead of stopping the service.
+func (h *handler) safe(name string, f func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.log.Printf("panic in %s: %v", name, r)
+		}
+	}()
+	f()
 }
 
 func (h *handler) reconcile() {

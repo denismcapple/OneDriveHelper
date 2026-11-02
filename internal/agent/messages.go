@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/folders"
+	"github.com/denismcapple/OneDriveHelper/internal/migrate"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
 	"github.com/denismcapple/OneDriveHelper/internal/popup"
 	"github.com/denismcapple/OneDriveHelper/internal/remediate"
@@ -36,6 +38,8 @@ type Actions struct {
 	Fix         func()
 	Explain     func(topic string)
 	CopyDetails func()
+	OneDrive    func(p Problem) // fix a OneDrive problem (its own command, or a restart)
+	Migrate     func()          // move redirected folders to OneDrive backup
 }
 
 func or(s, def string) string {
@@ -130,7 +134,7 @@ func orphanSpec(c config.Config, orphans []onedrive.Orphan, a Actions) popup.Spe
 	}
 	s.Buttons = append(s.Buttons, supportButton(c, a))
 	if c.RemediationEnabled {
-		s.Buttons = append(s.Buttons, popup.Button{Label: "Fix (admin)", Primary: true, Dismiss: true, Action: a.Fix})
+		s.Buttons = append(s.Buttons, popup.Button{Label: c.FixLabel(), Primary: true, Dismiss: true, Action: a.Fix})
 	}
 	return s
 }
@@ -144,7 +148,30 @@ func fixingSpec(c config.Config) popup.Spec {
 	}
 }
 
-// SampleSpecs returns both alerts with the given actions (used by previews).
+// SampleSpecs returns the alerts with the given actions (used by previews):
+// the OneDrive problem and folder move cards only when those features are on.
 func SampleSpecs(c config.Config, orphans []onedrive.Orphan, a Actions) []popup.Spec {
-	return []popup.Spec{orphanSpec(c, orphans, a), notRunningSpec(c, a, c.AutoRestartEnabled)}
+	specs := []popup.Spec{orphanSpec(c, orphans, a), notRunningSpec(c, a, c.AutoRestartEnabled)}
+	if c.OneDriveIssueAlerts {
+		specs = append(specs, issuesSpec(c, SampleProblems(), a))
+	}
+	if c.FolderRedirectionMigration {
+		specs = append(specs, migrateSpec(c, SampleOffer(), a))
+	}
+	return specs
+}
+
+// SampleProblems is an example of what OneDrive reports (previews, screenshots).
+func SampleProblems() []Problem {
+	return []Problem{{Key: "sample", Text: "You have 2 sync issues", Action: "View sync issues", RootID: "sample",
+		Libraries: []string{"OneDrive - AcmeCorp", "Projects - Documents"}}}
+}
+
+// SampleOffer is an example folder move (previews, screenshots).
+func SampleOffer() *migrate.Offer {
+	return &migrate.Offer{Folders: []folders.Folder{
+		{Value: "Desktop", Name: "Desktop", ID: "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}", Rel: "Desktop", Current: `\\fs01\users\jsmith\Desktop`},
+		{Value: "Personal", Name: "Documents", ID: "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}", Rel: "Documents", Current: `\\fs01\users\jsmith\Documents`},
+		{Value: "My Pictures", Name: "Pictures", ID: "{33E28130-4E1E-4676-835A-98395C3BC3BB}", Rel: "Pictures", Current: `\\fs01\users\jsmith\Pictures`},
+	}}
 }

@@ -27,7 +27,8 @@ const windowTitle = "OneDrive Helper - Settings"
 // tell shows the settings tool's messages as cards with its own title.
 var tell = dialog.WithBrand(windowTitle)
 
-// Layout: two columns of grouped settings.
+// Layout: three columns of grouped settings (wide rather than tall, so the
+// window fits laptop screens with display scaling).
 var layout = [][]struct {
 	title  string
 	fields []string
@@ -38,9 +39,24 @@ var layout = [][]struct {
 	},
 	{
 		{"OneDrive running check", []string{"OneDriveCheckEnabled", "OneDriveMissingGraceSeconds", "AutoRestartEnabled", "AutoRestartAttempts", "IgnoreOptions"}},
-		{"Library sync check", []string{"OrphanCheckEnabled", "RemediationEnabled", "RestartToFinish", "BackupRoot", "FreeSpaceMarginMB"}},
+		{"Library sync check and fixes", []string{"OrphanCheckEnabled", "RemediationEnabled", "RequireAdminApproval", "RestartToFinish", "BackupRoot", "FreeSpaceMarginMB"}},
+		{"OneDrive problems", []string{"OneDriveIssueAlerts", "IssueAlertGraceMinutes"}},
+	},
+	{
+		{"Folder Redirection -> OneDrive backup", []string{"FolderRedirectionMigration", "KFMTenantID", "MigrationShortcutName", "MigrationShortcutTarget", "MigrationNoteText"}},
 		{"General", []string{"TrayIconEnabled", "PopupSound", "CheckIntervalSeconds", "AgentWatchdogSeconds"}},
 	},
+}
+
+// Column geometry (at 96 DPI).
+const (
+	colWidth   = 460
+	colGap     = 14
+	formMargin = 16
+)
+
+func formWidth() int32 {
+	return 2*formMargin + int32(len(layout))*colWidth + int32(len(layout)-1)*colGap
 }
 
 // Command IDs.
@@ -106,7 +122,7 @@ func Run(file string) error {
 		return errors.New("RegisterClassEx failed")
 	}
 
-	w, h := f.s(1000), f.s(690)
+	w, h := f.s(formWidth()), f.s(690)
 	if len(config.PolicyOverrides()) > 0 {
 		h += f.s(40)
 	}
@@ -156,14 +172,15 @@ func (f *form) child(class, text string, style uintptr, exStyle uintptr, x, y, w
 
 // build creates all controls.
 func (f *form) build(clientH int32) {
-	margin, colW, gap := f.s(16), f.s(476), f.s(16)
-	labelW := f.s(222)
+	margin, colW, gap := f.s(formMargin), f.s(colWidth), f.s(colGap)
+	labelW := f.s(224)
+	full := f.s(formWidth()) - 2*margin // width of the help line and button row
 	rowH, editH, checkH, multiH := f.s(31), f.s(24), f.s(26), f.s(64)
 
 	y0 := margin
 	if p := config.PolicyOverrides(); len(p) > 0 {
 		note := f.child("STATIC", fmt.Sprintf("Note: %d setting(s) on this PC are enforced by Group Policy (HKLM\\SOFTWARE\\Policies\\OneDriveHelper) and override what is saved here: %s",
-			len(p), strings.Join(p, ", ")), ssLeft, 0, margin, y0, 2*colW+gap, f.s(34), 0)
+			len(p), strings.Join(p, ", ")), ssLeft, 0, margin, y0, full, f.s(34), 0)
 		_ = note
 		y0 += f.s(40)
 	}
@@ -215,8 +232,9 @@ func (f *form) build(clientH int32) {
 	// Help line, status line and buttons along the bottom.
 	btnH, btnW := f.s(32), f.s(130)
 	by := clientH - margin - btnH
-	f.help = f.child("STATIC", "Click a setting to see what it does.", ssLeft, 0, margin, by-f.s(52), 2*colW+gap, f.s(20), 0)
-	f.status = f.child("STATIC", "", ssLeftNoWrap, 0, margin, by-f.s(28), 2*colW+gap, f.s(20), 0)
+	// Up to three lines: some settings need a few sentences.
+	f.help = f.child("STATIC", "Click a setting to see what it does.", ssLeft, 0, margin, by-f.s(92), full, f.s(60), 0)
+	f.status = f.child("STATIC", "", ssLeftNoWrap, 0, margin, by-f.s(28), full, f.s(20), 0)
 	call(pSendMessageW, f.status, wmSetFont, f.bold, 1)
 	left := []struct {
 		id    int
@@ -227,7 +245,7 @@ func (f *form) build(clientH int32) {
 		f.child("BUTTON", b.label, wsTabStop|bsPushButton, 0, bx, by, btnW, btnH, b.id)
 		bx += btnW + f.s(8)
 	}
-	right := 2*colW + gap + margin
+	right := full + margin
 	f.child("BUTTON", "Close", wsTabStop|bsPushButton, 0, right-btnW, by, btnW, btnH, idClose)
 	save := f.child("BUTTON", "Save to this PC", wsTabStop|bsDefPushButton, 0, right-2*btnW-f.s(8), by, btnW, btnH, idSave)
 	if !winapi.IsElevated() {

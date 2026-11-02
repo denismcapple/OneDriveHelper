@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/denismcapple/OneDriveHelper/internal/config"
+	"github.com/denismcapple/OneDriveHelper/internal/dialog"
 	"github.com/denismcapple/OneDriveHelper/internal/elog"
 	"github.com/denismcapple/OneDriveHelper/internal/ipc"
 	"github.com/denismcapple/OneDriveHelper/internal/onedrive"
@@ -262,6 +263,48 @@ func TestResultMessage(t *testing.T) {
 	}
 	if got := joinNames([]string{"A", "B", "C"}); got != "A, B and C" {
 		t.Errorf("joinNames: %q", got)
+	}
+}
+
+// With administrator approval turned off, the user's confirmation is enough:
+// no UAC prompt, the fix runs, event 5001 records who confirmed it, and the
+// confirmation doesn't mention an administrator.
+func TestUserFlowWithoutAdminApproval(t *testing.T) {
+	_, rec := testEnv(t)
+	saved := flow
+	defer func() { flow = saved }()
+	cfg := config.Defaults()
+	cfg.RequireAdminApproval = false
+	var footer string
+	executed := false
+	plan := &Plan{Target: Target{UserName: `TEST\jsmith`, SID: "S-1-5-21-1"},
+		Items: []Item{{Orphan: onedrive.Orphan{Path: `C:\Users\jsmith\Contoso\Lib`, Name: "Lib"}}}, FreeBytes: 10, Required: 1}
+	flow = flowEnv{
+		config:  func() config.Config { return cfg },
+		target:  func() (Target, error) { return plan.Target, nil },
+		recover: func(Target, *log.Logger) {},
+		plan:    func(Target, config.Config) (*Plan, error) { return plan, nil },
+		elevate: func(string, []string, time.Time) (uint32, error, <-chan struct{}) {
+			t.Fatal("no UAC prompt when administrator approval is off")
+			return 0, nil, nil
+		},
+		execute: func(*Plan, *log.Logger, *elog.Log, func() bool) (*Result, error) {
+			executed = true
+			return &Result{}, nil
+		},
+		resync:  func([]onedrive.Orphan, *log.Logger) string { return "" },
+		info:    func(string, string) {},
+		warn:    func(string, string) {},
+		fail:    func(_, m string) { t.Errorf("fail: %s", m) },
+		confirm: func(_ string, _ []popup.Item, f string) bool { footer = f; return true },
+		result:  func(dialog.Message) {},
+	}
+	UserFlow("agent.exe", discard, func(bool) {}, func() bool { return false })
+	if !executed || !rec.has(elog.RemediationStarted) || strings.Contains(footer, "administrator") {
+		t.Errorf("executed=%v events=%v footer=%q", executed, rec.events, footer)
+	}
+	if cfg.FixLabel() != "Fix" || config.Defaults().FixLabel() != "Fix (admin)" {
+		t.Error("the button says (admin) only when an administrator has to approve")
 	}
 }
 

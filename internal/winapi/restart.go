@@ -14,6 +14,17 @@ import (
 // or multi-session host (RDS, AVD), not a Citrix, VMware Horizon or FSLogix
 // environment, and with nobody else signed in.
 func RestartBlockers() []string {
+	why := SharedHostReasons()
+	if n := otherSessions(); n > 0 {
+		why = append(why, "someone else is signed in to this PC")
+	}
+	return why
+}
+
+// SharedHostReasons lists why this computer is a shared or virtual desktop
+// host rather than a workstation: a server or multi-session host (RDS, AVD),
+// Citrix, VMware Horizon or FSLogix. Empty on a workstation.
+func SharedHostReasons() []string {
 	var why []string
 	if v := windows.RtlGetVersion(); v == nil || v.ProductType != 1 { // VER_NT_WORKSTATION
 		why = append(why, "this is a server, not a workstation")
@@ -56,9 +67,6 @@ func RestartBlockers() []string {
 			why = append(why, "FSLogix profile containers are in use")
 			break
 		}
-	}
-	if n := otherSessions(); n > 0 {
-		why = append(why, "someone else is signed in to this PC")
 	}
 	return why
 }

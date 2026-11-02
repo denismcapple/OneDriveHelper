@@ -168,6 +168,15 @@ type flowEnv struct {
 	result func(m dialog.Message)
 	// choose shows buttons (primary = accent button) and returns the index clicked.
 	choose func(heading, text string, buttons []string, primary int) int
+	// config returns the settings (nil = config.Load).
+	config func() config.Config
+}
+
+func (f flowEnv) loadConfig() config.Config {
+	if f.config != nil {
+		return f.config()
+	}
+	return config.Load()
 }
 
 func defaultFlowEnv() flowEnv {
@@ -204,7 +213,7 @@ var flow = defaultFlowEnv()
 // reports that OneDrive Helper is stopping (e.g. for an upgrade): no fix
 // starts after that, and no further folder is moved.
 func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool) {
-	cfg := config.Load()
+	cfg := flow.loadConfig()
 	t, err := flow.target()
 	if err != nil {
 		flow.fail("The fix can't start", err.Error())
@@ -254,27 +263,14 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 	}
 	items, _ := Items(plan.Orphans(), 0)
 	items = append(items, savedTo("Your files are saved to", plan.BackupDir))
-	if !flow.confirm("Fix these folders?", items, "Nothing is deleted until a copy is saved.\nAn administrator needs to approve this.") {
+	footer := "Nothing is deleted until a copy is saved."
+	if cfg.RequireAdminApproval {
+		footer += "\nAn administrator needs to approve this."
+	}
+	if !flow.confirm("Fix these folders?", items, footer) {
 		return
 	}
-	deadline := time.Now().Add(approvalDeadline)
-	code, err, returned := flow.elevate(agentExe, []string{"remediate-approve", "--sid", t.SID,
-		"--deadline", strconv.FormatInt(deadline.Unix(), 10)}, deadline)
-	switch {
-	case errors.Is(err, winapi.ErrTimedOut):
-		lg.Printf("approval not answered within %s; nothing changed", approvalDeadline)
-		flow.info("Nothing was changed", "Nobody approved the fix within 15 minutes, so nothing was changed.\n\n"+cfg.SupportContact())
-		<-returned // keep "fixing" set until the stale UAC prompt is gone, so no second prompt appears
-		return
-	case errors.Is(err, winapi.ErrCancelled):
-		flow.info("Cancelled", "Cancelled. No changes were made.\n\n"+cfg.SupportContact())
-		return
-	case err != nil:
-		lg.Printf("elevate: %v", err)
-		flow.fail("Administrator approval failed", "Could not request administrator approval: "+err.Error())
-		return
-	case code != ExitApproved:
-		lg.Printf("approval step exited with %d", code)
+	if !approve(cfg, t, agentExe, plan, lg) {
 		return
 	}
 	host, _ := os.Hostname()
@@ -312,6 +308,42 @@ func UserFlow(agentExe string, lg *log.Logger, busy func(bool), stop func() bool
 		return
 	}
 	afterExecute(t, cfg, again, res, lg, 0, appr)
+}
+
+// approve gets the go-ahead for plan after the user confirmed it: an
+// administrator's approval through UAC, or, with RequireAdminApproval off,
+// the user's own confirmation (recorded as event 5001 like an approval).
+func approve(cfg config.Config, t Target, agentExe string, plan *Plan, lg *log.Logger) bool {
+	if !cfg.RequireAdminApproval {
+		msg := fmt.Sprintf("%s confirmed the fix for their own folders (administrator approval is turned off):\r\n%s", t.UserName, plan.Summary())
+		lg.Printf("%s", msg)
+		ev := elog.Open()
+		defer ev.Close()
+		ev.Info(elog.RemediationStarted, msg)
+		env.onEvent(elog.RemediationStarted)
+		return true
+	}
+	deadline := time.Now().Add(approvalDeadline)
+	code, err, returned := flow.elevate(agentExe, []string{"remediate-approve", "--sid", t.SID,
+		"--deadline", strconv.FormatInt(deadline.Unix(), 10)}, deadline)
+	switch {
+	case errors.Is(err, winapi.ErrTimedOut):
+		lg.Printf("approval not answered within %s; nothing changed", approvalDeadline)
+		flow.info("Nothing was changed", "Nobody approved the fix within 15 minutes, so nothing was changed.\n\n"+cfg.SupportContact())
+		<-returned // keep "fixing" set until the stale UAC prompt is gone, so no second prompt appears
+		return false
+	case errors.Is(err, winapi.ErrCancelled):
+		flow.info("Cancelled", "Cancelled. No changes were made.\n\n"+cfg.SupportContact())
+		return false
+	case err != nil:
+		lg.Printf("elevate: %v", err)
+		flow.fail("Administrator approval failed", "Could not request administrator approval: "+err.Error())
+		return false
+	case code != ExitApproved:
+		lg.Printf("approval step exited with %d", code)
+		return false
+	}
+	return true
 }
 
 // afterExecute tells the user the result (offering a restart or sign-out if
